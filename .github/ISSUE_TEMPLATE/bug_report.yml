@@ -21,7 +21,6 @@ body:
       label: Platform
       options:
         - Android
-        - Windows
     validations:
       required: true
   - type: dropdown

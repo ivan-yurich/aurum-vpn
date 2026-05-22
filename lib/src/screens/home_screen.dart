@@ -1,21 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:tray_manager/tray_manager.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:window_manager/window_manager.dart';
 
 import '../models/vpn_profile.dart';
 import '../services/profile_importer.dart';
 import '../services/profile_store.dart';
 import '../services/sing_box_config_builder.dart';
 import '../services/vpn_engine.dart';
-import '../services/windows_integration_service.dart';
 import 'qr_scan_screen.dart';
 
 const _gold = Color(0xFFD9A441);
@@ -54,13 +49,11 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen>
-    with TrayListener, WindowListener {
+class _HomeScreenState extends State<HomeScreen> {
   final _vpnEngine = createVpnEngine();
   final _store = ProfileStore();
   final _importer = ProfileImporter();
   final _configBuilder = SingBoxConfigBuilder();
-  final _windowsIntegration = WindowsIntegrationService();
   final _manualController = TextEditingController();
 
   StreamSubscription<Map<String, dynamic>>? _statusSubscription;
@@ -80,14 +73,6 @@ class _HomeScreenState extends State<HomeScreen>
   String? _lastError;
   bool _busy = false;
   bool _stoppingByUser = false;
-  bool _windowsSettingsBusy = false;
-  bool _checkingUpdate = false;
-  bool _autoStart = false;
-  bool _autoConnect = false;
-  bool _autoConnectAttempted = false;
-  bool _quitFromTray = false;
-  List<String> _splitTunnelExcludedProcesses = const [];
-  WindowsUpdateInfo? _updateInfo;
   String? _lastConfigSummary;
   final _logs = <String>[];
   final _pendingLogs = <String>[];
@@ -106,89 +91,9 @@ class _HomeScreenState extends State<HomeScreen>
   bool get _connected =>
       _status == AurumVpnStatus.started || _status == AurumVpnStatus.starting;
 
-  Future<void> _setupTray() async {
-    if (!Platform.isWindows) {
-      return;
-    }
-    await trayManager.setIcon(await _windowsTrayIconPath());
-    await trayManager.setToolTip(_appName);
-    await _refreshTrayMenu();
-  }
-
-  Future<String> _windowsTrayIconPath() async {
-    final executableDir = File(Platform.resolvedExecutable).parent;
-    final releaseIcon = File(
-      '${executableDir.path}\\data\\flutter_assets\\windows\\runner\\resources\\app_icon.ico',
-    );
-    if (await releaseIcon.exists()) {
-      return releaseIcon.path;
-    }
-
-    final devIcon = File('windows\\runner\\resources\\app_icon.ico');
-    if (await devIcon.exists()) {
-      return devIcon.absolute.path;
-    }
-
-    return releaseIcon.path;
-  }
-
-  Future<void> _refreshTrayMenu() async {
-    if (!Platform.isWindows) {
-      return;
-    }
-    final connected = _status == AurumVpnStatus.started;
-    final connecting = _status == AurumVpnStatus.starting;
-    final stopping = _status == AurumVpnStatus.stopping;
-    await trayManager.setContextMenu(
-      Menu(
-        items: [
-          MenuItem(key: 'show', label: s.trayShow),
-          MenuItem(key: 'hide', label: s.trayHide),
-          MenuItem.separator(),
-          MenuItem(
-            key: 'toggle',
-            label: connected ? s.disconnect : s.connect,
-            disabled:
-                _busy || _selectedProfile == null || connecting || stopping,
-          ),
-          MenuItem.separator(),
-          MenuItem(key: 'quit', label: s.trayQuit),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _showMainWindow() async {
-    if (!Platform.isWindows) {
-      return;
-    }
-    await windowManager.show();
-    await windowManager.focus();
-  }
-
-  Future<void> _hideToTray() async {
-    if (!Platform.isWindows) {
-      return;
-    }
-    await windowManager.hide();
-  }
-
-  Future<void> _quitAppFromTray() async {
-    _quitFromTray = true;
-    await trayManager.destroy();
-    await windowManager.setPreventClose(false);
-    await _vpnEngine.stopVPN();
-    await windowManager.close();
-  }
-
   @override
   void initState() {
     super.initState();
-    if (Platform.isWindows) {
-      trayManager.addListener(this);
-      windowManager.addListener(this);
-      unawaited(_setupTray());
-    }
     _load();
     _initVpn();
   }
@@ -199,62 +104,15 @@ class _HomeScreenState extends State<HomeScreen>
     _trafficSubscription?.cancel();
     _logSubscription?.cancel();
     _logFlushTimer?.cancel();
-    if (Platform.isWindows) {
-      trayManager.removeListener(this);
-      windowManager.removeListener(this);
-      unawaited(trayManager.destroy());
-    }
     _manualController.dispose();
     unawaited(_vpnEngine.dispose());
     super.dispose();
-  }
-
-  @override
-  void onTrayIconMouseDown() {
-    unawaited(_showMainWindow());
-  }
-
-  @override
-  void onTrayIconRightMouseDown() {
-    unawaited(trayManager.popUpContextMenu());
-  }
-
-  @override
-  void onTrayMenuItemClick(MenuItem menuItem) {
-    switch (menuItem.key) {
-      case 'show':
-        unawaited(_showMainWindow());
-        break;
-      case 'hide':
-        unawaited(_hideToTray());
-        break;
-      case 'toggle':
-        unawaited(_toggleVpn());
-        break;
-      case 'quit':
-        unawaited(_quitAppFromTray());
-        break;
-    }
-  }
-
-  @override
-  void onWindowClose() {
-    if (_quitFromTray) {
-      return;
-    }
-    unawaited(_hideToTray());
   }
 
   Future<void> _load() async {
     final profiles = await _store.loadProfiles();
     final selectedId = await _store.loadSelectedProfileId();
     final language = _AppLanguage.fromCode(await _store.loadLanguageCode());
-    final autoConnect = await _store.loadAutoConnect();
-    final splitTunnelExcludedProcesses = await _store
-        .loadSplitTunnelExcludedProcesses();
-    final autoStart = Platform.isWindows
-        ? await _windowsIntegration.isAutoStartEnabled()
-        : false;
     if (!mounted) {
       return;
     }
@@ -267,27 +125,10 @@ class _HomeScreenState extends State<HomeScreen>
       _language = language;
       _profiles = profiles;
       _selectedProfileId = resolvedSelectedId;
-      _autoConnect = autoConnect;
-      _autoStart = autoStart;
-      _splitTunnelExcludedProcesses = splitTunnelExcludedProcesses;
       _message = profiles.isEmpty
           ? strings.addProfileHint
           : strings.loadedProfiles(profiles.length);
     });
-
-    if (Platform.isWindows &&
-        autoConnect &&
-        resolvedSelectedId != null &&
-        !_autoConnectAttempted) {
-      _autoConnectAttempted = true;
-      unawaited(
-        Future<void>.delayed(const Duration(milliseconds: 1400), () async {
-          if (mounted && !_connected && !_busy) {
-            await _connect();
-          }
-        }),
-      );
-    }
   }
 
   Future<void> _initVpn() async {
@@ -321,7 +162,6 @@ class _HomeScreenState extends State<HomeScreen>
             _message = s.openLogsMessage;
           }
         });
-        unawaited(_refreshTrayMenu());
       }
     });
 
@@ -387,11 +227,6 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _importFromQr() async {
-    if (Platform.isWindows) {
-      _showSnack(s.qrCameraUnavailable);
-      await _showImportSheet();
-      return;
-    }
     final value = await Navigator.of(
       context,
     ).push<String>(MaterialPageRoute(builder: (_) => const QrScanScreen()));
@@ -504,7 +339,6 @@ class _HomeScreenState extends State<HomeScreen>
         _selectedProfileId = imported.first.id;
         _message = s.imported(imported.length);
       });
-      unawaited(_refreshTrayMenu());
       _showSnack(s.importedProfiles(imported.length));
     });
   }
@@ -533,7 +367,6 @@ class _HomeScreenState extends State<HomeScreen>
         _message = s.selectedProfile(profile.name);
       });
       await _store.saveSelectedProfileId(profile.id);
-      unawaited(_refreshTrayMenu());
       return;
     }
 
@@ -570,11 +403,7 @@ class _HomeScreenState extends State<HomeScreen>
     _lastError = null;
     await _vpnEngine.clearLogs();
 
-    final config = _configBuilder.build(
-      profile,
-      target: _vpnEngine.configTarget,
-      splitTunnelExcludedProcesses: _splitTunnelExcludedProcesses,
-    );
+    final config = _configBuilder.build(profile);
     final configSummary = _summarizeSingBoxConfig(
       config,
       target: _vpnEngine.configTarget,
@@ -722,7 +551,6 @@ class _HomeScreenState extends State<HomeScreen>
       _language = language;
       _message = strings.languageChanged;
     });
-    unawaited(_refreshTrayMenu());
     try {
       await _vpnEngine.setNotificationDescription(
         strings.notificationDescription,
@@ -730,174 +558,6 @@ class _HomeScreenState extends State<HomeScreen>
     } on Object {
       // Native plugin is unavailable in widget tests and desktop preview.
     }
-  }
-
-  Future<void> _setAutoConnect(bool value) async {
-    await _store.saveAutoConnect(value);
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _autoConnect = value;
-      _message = value ? s.autoConnectEnabled : s.autoConnectDisabled;
-    });
-  }
-
-  Future<void> _setAutoStart(bool value) async {
-    if (!Platform.isWindows || _windowsSettingsBusy) {
-      return;
-    }
-    setState(() => _windowsSettingsBusy = true);
-    try {
-      await _windowsIntegration.setAutoStart(value);
-      final enabled = await _windowsIntegration.isAutoStartEnabled();
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _autoStart = enabled;
-        _message = enabled ? s.autoStartEnabled : s.autoStartDisabled;
-      });
-    } on Object catch (e) {
-      if (mounted) {
-        _showSnack('${s.autoStartFailed}: ${_redactSensitive('$e')}');
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _windowsSettingsBusy = false);
-      }
-    }
-  }
-
-  Future<void> _checkForUpdates() async {
-    if (_checkingUpdate) {
-      return;
-    }
-    setState(() {
-      _checkingUpdate = true;
-      _updateInfo = null;
-      _message = s.checkingUpdates;
-    });
-    final info = await _windowsIntegration.checkForUpdate(_appVersion);
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _checkingUpdate = false;
-      _updateInfo = info;
-      _message = s.updateMessage(info);
-    });
-    if (info.available && info.releaseUrl != null) {
-      _showSnack(
-        s.updateMessage(info),
-        action: SnackBarAction(
-          label: s.openRelease,
-          onPressed: () => unawaited(_openUrl(info.releaseUrl.toString())),
-        ),
-      );
-    }
-  }
-
-  Future<void> _showSplitTunnelSheet() async {
-    final controller = TextEditingController(
-      text: _splitTunnelExcludedProcesses.join('\n'),
-    );
-    final value = await showDialog<List<String>>(
-      context: context,
-      builder: (context) {
-        Future<void> pickExecutables() async {
-          final result = await FilePicker.pickFiles(
-            dialogTitle: s.pickExeTitle,
-            type: FileType.custom,
-            allowedExtensions: const ['exe'],
-            allowMultiple: true,
-          );
-          final paths =
-              result?.files
-                  .map((file) => file.path)
-                  .whereType<String>()
-                  .toList() ??
-              const [];
-          if (paths.isEmpty) {
-            return;
-          }
-          final names = paths
-              .map((path) => path.split(RegExp(r'[\\/]')).last)
-              .where((name) => name.toLowerCase().endsWith('.exe'));
-          final merged = _parseProcessList(
-            [..._parseProcessList(controller.text), ...names].join('\n'),
-          );
-          controller.text = merged.join('\n');
-        }
-
-        return AlertDialog(
-          title: Text(s.splitTunnelTitle),
-          content: SizedBox(
-            width: 440,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(s.splitTunnelDescription),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: controller,
-                  minLines: 4,
-                  maxLines: 8,
-                  decoration: InputDecoration(hintText: s.splitTunnelHint),
-                ),
-                const SizedBox(height: 10),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: OutlinedButton.icon(
-                    onPressed: () => unawaited(pickExecutables()),
-                    icon: const Icon(Icons.folder_open),
-                    label: Text(s.pickExeButton),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: Text(s.cancel),
-            ),
-            FilledButton(
-              onPressed: () {
-                Navigator.of(context).pop(_parseProcessList(controller.text));
-              },
-              child: Text(s.save),
-            ),
-          ],
-        );
-      },
-    );
-    controller.dispose();
-
-    if (value == null) {
-      return;
-    }
-    await _store.saveSplitTunnelExcludedProcesses(value);
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _splitTunnelExcludedProcesses = value;
-      _message = _connected ? s.reconnectToApply : s.settingsSaved;
-    });
-  }
-
-  List<String> _parseProcessList(String value) {
-    final items = value
-        .split(RegExp(r'[\n,;]+'))
-        .map((item) => item.trim())
-        .where((item) => item.isNotEmpty)
-        .where((item) => !item.contains('\\') && !item.contains('/'))
-        .toSet()
-        .toList();
-    items.sort();
-    return items;
   }
 
   String _profileKindLabel(VpnProfileKind kind) {
@@ -1001,7 +661,6 @@ class _HomeScreenState extends State<HomeScreen>
     } finally {
       if (mounted) {
         setState(() => _busy = false);
-        unawaited(_refreshTrayMenu());
       }
     }
   }
@@ -1232,25 +891,6 @@ class _HomeScreenState extends State<HomeScreen>
               onDelete: selected == null ? null : _deleteSelected,
               kindLabel: _profileKindLabel,
             ),
-            if (Platform.isWindows) ...[
-              const SizedBox(height: 14),
-              _WindowsToolsPanel(
-                strings: s,
-                autoStart: _autoStart,
-                autoConnect: _autoConnect,
-                busy: _windowsSettingsBusy,
-                checkingUpdate: _checkingUpdate,
-                excludedProcessCount: _splitTunnelExcludedProcesses.length,
-                updateInfo: _updateInfo,
-                onAutoStartChanged: (value) => unawaited(_setAutoStart(value)),
-                onAutoConnectChanged: (value) =>
-                    unawaited(_setAutoConnect(value)),
-                onEditSplitTunnel: _showSplitTunnelSheet,
-                onCheckUpdate: _checkForUpdates,
-                onOpenReleases: () =>
-                    _openUrl(WindowsIntegrationService.releasesUrl),
-              ),
-            ],
             const SizedBox(height: 18),
             FilledButton.icon(
               onPressed: _busy || selected == null ? null : _toggleVpn,
@@ -1665,123 +1305,6 @@ class _ProfileInsightPanel extends StatelessWidget {
   }
 }
 
-class _WindowsToolsPanel extends StatelessWidget {
-  const _WindowsToolsPanel({
-    required this.strings,
-    required this.autoStart,
-    required this.autoConnect,
-    required this.busy,
-    required this.checkingUpdate,
-    required this.excludedProcessCount,
-    required this.updateInfo,
-    required this.onAutoStartChanged,
-    required this.onAutoConnectChanged,
-    required this.onEditSplitTunnel,
-    required this.onCheckUpdate,
-    required this.onOpenReleases,
-  });
-
-  final _Strings strings;
-  final bool autoStart;
-  final bool autoConnect;
-  final bool busy;
-  final bool checkingUpdate;
-  final int excludedProcessCount;
-  final WindowsUpdateInfo? updateInfo;
-  final ValueChanged<bool> onAutoStartChanged;
-  final ValueChanged<bool> onAutoConnectChanged;
-  final VoidCallback onEditSplitTunnel;
-  final VoidCallback onCheckUpdate;
-  final VoidCallback onOpenReleases;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: _surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _gold.withValues(alpha: 0.18)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.desktop_windows_outlined, color: _goldSoft),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    strings.windowsTools,
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: autoStart,
-              onChanged: busy ? null : onAutoStartChanged,
-              title: Text(strings.autoStart),
-              subtitle: Text(strings.autoStartHint),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: autoConnect,
-              onChanged: onAutoConnectChanged,
-              title: Text(strings.autoConnect),
-              subtitle: Text(strings.autoConnectHint),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: onEditSplitTunnel,
-                  icon: const Icon(Icons.call_split_outlined),
-                  label: Text(strings.splitTunnelButton(excludedProcessCount)),
-                ),
-                OutlinedButton.icon(
-                  onPressed: checkingUpdate ? null : onCheckUpdate,
-                  icon: checkingUpdate
-                      ? const SizedBox.square(
-                          dimension: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.system_update_alt),
-                  label: Text(
-                    checkingUpdate ? strings.checkingUpdates : strings.updates,
-                  ),
-                ),
-                TextButton.icon(
-                  onPressed: onOpenReleases,
-                  icon: const Icon(Icons.open_in_new),
-                  label: const Text('GitHub'),
-                ),
-              ],
-            ),
-            if (updateInfo != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                strings.updateMessage(updateInfo!),
-                style: TextStyle(
-                  color: updateInfo!.available
-                      ? const Color(0xFFFFD1A8)
-                      : _mutedGold,
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _SupportPanel extends StatelessWidget {
   const _SupportPanel({
     required this.strings,
@@ -1980,13 +1503,11 @@ class _Strings {
     required this.vpnStoppedUnexpectedly,
     required this.openLogsMessage,
     required this.languageChanged,
-    required this.windowsEdition,
     required this.addProfile,
     required this.importHint,
     required this.importAction,
     required this.clipboard,
     required this.scanQr,
-    required this.qrCameraUnavailable,
     required this.pasteFromClipboard,
     required this.language,
     required this.connected,
@@ -2017,31 +1538,6 @@ class _Strings {
     required this.faqItems,
     required this.logs,
     required this.noLogs,
-    required this.windowsTools,
-    required this.autoStart,
-    required this.autoStartHint,
-    required this.autoStartEnabled,
-    required this.autoStartDisabled,
-    required this.autoStartFailed,
-    required this.autoConnect,
-    required this.autoConnectHint,
-    required this.autoConnectEnabled,
-    required this.autoConnectDisabled,
-    required this.splitTunnelTitle,
-    required this.splitTunnelDescription,
-    required this.splitTunnelHint,
-    required this.pickExeButton,
-    required this.pickExeTitle,
-    required this.settingsSaved,
-    required this.reconnectToApply,
-    required this.updates,
-    required this.checkingUpdates,
-    required this.openRelease,
-    required this.save,
-    required this.cancel,
-    required this.trayShow,
-    required this.trayHide,
-    required this.trayQuit,
     required this.notificationDescription,
   });
 
@@ -2065,13 +1561,11 @@ class _Strings {
   final String vpnStoppedUnexpectedly;
   final String openLogsMessage;
   final String languageChanged;
-  final String windowsEdition;
   final String addProfile;
   final String importHint;
   final String importAction;
   final String clipboard;
   final String scanQr;
-  final String qrCameraUnavailable;
   final String pasteFromClipboard;
   final String language;
   final String connected;
@@ -2102,31 +1596,6 @@ class _Strings {
   final List<_FaqItem> faqItems;
   final String logs;
   final String noLogs;
-  final String windowsTools;
-  final String autoStart;
-  final String autoStartHint;
-  final String autoStartEnabled;
-  final String autoStartDisabled;
-  final String autoStartFailed;
-  final String autoConnect;
-  final String autoConnectHint;
-  final String autoConnectEnabled;
-  final String autoConnectDisabled;
-  final String splitTunnelTitle;
-  final String splitTunnelDescription;
-  final String splitTunnelHint;
-  final String pickExeButton;
-  final String pickExeTitle;
-  final String settingsSaved;
-  final String reconnectToApply;
-  final String updates;
-  final String checkingUpdates;
-  final String openRelease;
-  final String save;
-  final String cancel;
-  final String trayShow;
-  final String trayHide;
-  final String trayQuit;
   final String notificationDescription;
 
   static _Strings forLanguage(_AppLanguage language) {
@@ -2181,36 +1650,6 @@ class _Strings {
     _ => 'VPN не успел полностью остановиться. Последний статус: $status.',
   };
 
-  String serverNotResponding(String kind, String server, int port) {
-    return switch (this) {
-      _Strings.en =>
-        '$kind server $server:$port is not responding. Check the server or port.',
-      _ => '$kind сервер $server:$port не отвечает. Проверь сервер или порт.',
-    };
-  }
-
-  String splitTunnelButton(int count) => switch (this) {
-    _Strings.en when count == 0 => 'App exclusions',
-    _Strings.en => 'App exclusions: $count',
-    _ when count == 0 => 'Исключения приложений',
-    _ => 'Исключения: $count',
-  };
-
-  String updateMessage(WindowsUpdateInfo info) => switch (this) {
-    _Strings.en when info.available && info.latestVersion != null =>
-      'Update available: ${info.latestVersion}',
-    _Strings.en => info.message,
-    _ when info.available && info.latestVersion != null =>
-      'Доступно обновление: ${info.latestVersion}',
-    _ when info.message.contains('not published') =>
-      'Релизы GitHub пока не опубликованы.',
-    _ when info.message.contains('up to date') =>
-      'Установлена актуальная версия.',
-    _ when info.message.contains('failed') =>
-      'Не удалось проверить обновления.',
-    _ => info.message,
-  };
-
   static const ru = _Strings._(
     addProfileHint: 'Добавь подписку Remnawave, QR или отдельный ключ',
     nothingToImport: 'Нечего импортировать.',
@@ -2232,14 +1671,11 @@ class _Strings {
     vpnStoppedUnexpectedly: 'VPN остановлен неожиданно',
     openLogsMessage: 'VPN остановлен. Открой логи sing-box.',
     languageChanged: 'Язык переключён',
-    windowsEdition: 'Windows 11',
     addProfile: 'Добавить профиль',
     importHint: 'https://sub... или vless://... или naive+https://...',
     importAction: 'Импорт',
     clipboard: 'Буфер',
     scanQr: 'Сканировать QR',
-    qrCameraUnavailable:
-        'На Windows пока импортируй QR как текст: вставь ссылку вручную или из буфера.',
     pasteFromClipboard: 'Вставить из буфера',
     language: 'Язык',
     connected: 'Подключено',
@@ -2304,33 +1740,6 @@ class _Strings {
     ],
     logs: 'Логи sing-box',
     noLogs: 'Логов пока нет.',
-    windowsTools: 'Windows',
-    autoStart: 'Автостарт с Windows',
-    autoStartHint:
-        'Запускает Aurum VPN при входе в Windows через планировщик задач.',
-    autoStartEnabled: 'Автостарт включён',
-    autoStartDisabled: 'Автостарт выключен',
-    autoStartFailed: 'Не удалось изменить автостарт',
-    autoConnect: 'Автоподключение',
-    autoConnectHint: 'После запуска приложения подключает выбранный профиль.',
-    autoConnectEnabled: 'Автоподключение включено',
-    autoConnectDisabled: 'Автоподключение выключено',
-    splitTunnelTitle: 'Исключения приложений',
-    splitTunnelDescription:
-        'Укажи exe-файлы, которые должны идти напрямую, минуя VPN. По одному в строке.',
-    splitTunnelHint: 'chrome.exe\nsteam.exe\nqbittorrent.exe',
-    pickExeButton: 'Выбрать exe',
-    pickExeTitle: 'Выбери приложения для исключений',
-    settingsSaved: 'Настройки сохранены',
-    reconnectToApply: 'Настройки сохранены. Переподключи VPN, чтобы применить.',
-    updates: 'Обновления',
-    checkingUpdates: 'Проверяю...',
-    openRelease: 'Открыть',
-    save: 'Сохранить',
-    cancel: 'Отмена',
-    trayShow: 'Открыть Aurum VPN',
-    trayHide: 'Свернуть в трей',
-    trayQuit: 'Выход',
     notificationDescription: 'VPN подключение активно',
   );
 
@@ -2355,14 +1764,11 @@ class _Strings {
     vpnStoppedUnexpectedly: 'VPN stopped unexpectedly',
     openLogsMessage: 'VPN stopped. Open sing-box logs.',
     languageChanged: 'Language changed',
-    windowsEdition: 'Windows 11',
     addProfile: 'Add profile',
     importHint: 'https://sub... or vless://... or naive+https://...',
     importAction: 'Import',
     clipboard: 'Clipboard',
     scanQr: 'Scan QR',
-    qrCameraUnavailable:
-        'On Windows, import QR content as text: paste the link manually or from clipboard.',
     pasteFromClipboard: 'Paste from clipboard',
     language: 'Language',
     connected: 'Connected',
@@ -2426,32 +1832,6 @@ class _Strings {
     ],
     logs: 'sing-box logs',
     noLogs: 'No logs yet.',
-    windowsTools: 'Windows',
-    autoStart: 'Start with Windows',
-    autoStartHint: 'Starts Aurum VPN on Windows sign-in via Task Scheduler.',
-    autoStartEnabled: 'Startup enabled',
-    autoStartDisabled: 'Startup disabled',
-    autoStartFailed: 'Could not change startup',
-    autoConnect: 'Auto-connect',
-    autoConnectHint: 'Connects the selected profile after the app starts.',
-    autoConnectEnabled: 'Auto-connect enabled',
-    autoConnectDisabled: 'Auto-connect disabled',
-    splitTunnelTitle: 'App exclusions',
-    splitTunnelDescription:
-        'Enter exe files that should go directly and bypass the VPN. One per line.',
-    splitTunnelHint: 'chrome.exe\nsteam.exe\nqbittorrent.exe',
-    pickExeButton: 'Choose exe',
-    pickExeTitle: 'Choose apps to exclude',
-    settingsSaved: 'Settings saved',
-    reconnectToApply: 'Settings saved. Reconnect the VPN to apply them.',
-    updates: 'Updates',
-    checkingUpdates: 'Checking...',
-    openRelease: 'Open',
-    save: 'Save',
-    cancel: 'Cancel',
-    trayShow: 'Open Aurum VPN',
-    trayHide: 'Hide to tray',
-    trayQuit: 'Quit',
     notificationDescription: 'VPN connection is active',
   );
 }

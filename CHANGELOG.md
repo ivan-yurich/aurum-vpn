@@ -12,12 +12,6 @@
 - Kept protected DNS, mobile network tuning, and explicit profile stop/start
   behavior from the previous build.
 
-### Windows
-
-- Windows setup and portable artifacts are available for GitHub Releases.
-- Existing Windows features remain available: tray mode, autostart,
-  auto-connect, split tunneling, and GitHub release update checks.
-
 ### Verification
 
 - `flutter analyze`
@@ -38,5 +32,5 @@
 
 ## 1.0.0 - 2026-05-22
 
-- Initial public Windows edition with Flutter, sing-box, Wintun, tray support,
-  autostart, auto-connect, split tunneling, and installer/portable packaging.
+- Initial Android edition with Flutter, sing-box, profile import, QR import,
+  clipboard import, VLESS Reality, NaiveProxy, notifications, and diagnostics.

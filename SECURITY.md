@@ -14,8 +14,8 @@ links, server configs, or vulnerabilities that could expose users.
 The project should not store real VPN profiles, UUIDs, passwords, private keys,
 production configs, or signing keys in git.
 
-Generated release files (`.apk`, `.exe`, `.zip`, `.aab`) should be uploaded to
-GitHub Releases instead of being committed to the repository.
+Generated Android release files (`.apk`, `.aab`) should be uploaded to GitHub
+Releases instead of being committed to the repository.
 
 ## Supported Versions
 

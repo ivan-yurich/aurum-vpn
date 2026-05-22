@@ -1,9 +1,7 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'android_vpn_engine.dart';
 import 'sing_box_config_builder.dart';
-import 'windows_sing_box_engine.dart';
 
 class AurumVpnStatus {
   static const stopped = 'Stopped';
@@ -35,8 +33,5 @@ abstract class VpnEngine {
 }
 
 VpnEngine createVpnEngine() {
-  if (Platform.isWindows) {
-    return WindowsSingBoxEngine();
-  }
   return AndroidVpnEngine();
 }

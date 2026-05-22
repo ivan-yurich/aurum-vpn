@@ -45,9 +45,9 @@ migrate_working_dir/
 *.msix
 *.msi
 *.pdb
-!/assets/windows/sing-box/sing-box.exe
 
 # Platform folders that are not part of the current public source snapshot
+/windows/
 /ios/
 /linux/
 /macos/
