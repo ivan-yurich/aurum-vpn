@@ -29,7 +29,7 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.8';
+const _appVersion = '1.0.9';
 
 enum _AppLanguage {
   ru('ru'),
@@ -1196,44 +1196,14 @@ class _HomeScreenState extends State<HomeScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: Row(
+        title: const Row(
           children: [
-            const CircleAvatar(
+            CircleAvatar(
               radius: 17,
               backgroundImage: AssetImage('assets/images/app_icon.png'),
             ),
-            const SizedBox(width: 10),
-            const Text(_appName),
-            const Spacer(),
-            Text(
-              s.windowsEdition,
-              style: Theme.of(
-                context,
-              ).textTheme.labelLarge?.copyWith(color: _mutedGold),
-            ),
-            const SizedBox(width: 12),
-            PopupMenuButton<_AppLanguage>(
-              tooltip: s.language,
-              onSelected: (language) => unawaited(_setLanguage(language)),
-              itemBuilder: (context) => [
-                CheckedPopupMenuItem(
-                  value: _AppLanguage.ru,
-                  checked: _language == _AppLanguage.ru,
-                  child: const Text('Русский'),
-                ),
-                CheckedPopupMenuItem(
-                  value: _AppLanguage.en,
-                  checked: _language == _AppLanguage.en,
-                  child: const Text('English'),
-                ),
-              ],
-              child: Text(
-                _language.code.toUpperCase(),
-                style: Theme.of(
-                  context,
-                ).textTheme.labelLarge?.copyWith(color: _goldSoft),
-              ),
-            ),
+            SizedBox(width: 10),
+            Text(_appName),
           ],
         ),
       ),
@@ -1294,6 +1264,9 @@ class _HomeScreenState extends State<HomeScreen>
             const SizedBox(height: 16),
             _SupportPanel(
               strings: s,
+              language: _language,
+              onLanguageChanged: (language) =>
+                  unawaited(_setLanguage(language)),
               onSupport: () => _openUrl(_telegramUrl),
               onTelegram: () => _openUrl(_telegramUrl),
               onVk: () => _openUrl(_vkUrl),
@@ -1338,52 +1311,70 @@ class _StatusPanel extends StatelessWidget {
       _ => strings.stopped,
     };
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: _surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: connected ? _gold : Colors.white12),
-        boxShadow: [
-          BoxShadow(
-            color: connected ? _gold.withValues(alpha: 0.18) : Colors.black26,
-            blurRadius: 18,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(
-                  connected ? Icons.verified_user : Icons.shield_outlined,
-                  color: connected ? _goldSoft : _mutedGold,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    statusLabel,
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(message, style: const TextStyle(color: _mutedGold)),
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                _Metric(label: '↑', value: uplink),
-                _Metric(label: '↓', value: downlink),
-                _Metric(label: 'Σ', value: sessionTotal),
-              ],
+    return SizedBox(
+      height: 188,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: _surface,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: connected ? _gold : Colors.white12),
+          boxShadow: [
+            BoxShadow(
+              color: connected ? _gold.withValues(alpha: 0.18) : Colors.black26,
+              blurRadius: 18,
+              offset: const Offset(0, 8),
             ),
           ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    connected ? Icons.verified_user : Icons.shield_outlined,
+                    color: connected ? _goldSoft : _mutedGold,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      statusLabel,
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                message,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: _mutedGold),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: _Metric(label: '↑', value: uplink, fixed: true),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _Metric(label: '↓', value: downlink, fixed: true),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _Metric(
+                      label: 'Σ',
+                      value: sessionTotal,
+                      fixed: true,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1391,21 +1382,37 @@ class _StatusPanel extends StatelessWidget {
 }
 
 class _Metric extends StatelessWidget {
-  const _Metric({required this.label, required this.value});
+  const _Metric({required this.label, required this.value, this.fixed = false});
 
   final String label;
   final String value;
+  final bool fixed;
 
   @override
   Widget build(BuildContext context) {
+    final text = Text(
+      '$label $value',
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(letterSpacing: 0),
+    );
+
     return Container(
+      height: fixed ? 48 : null,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: _surfaceMetric,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: _gold.withValues(alpha: 0.18)),
       ),
-      child: Text('$label $value'),
+      alignment: Alignment.centerLeft,
+      child: fixed
+          ? FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: text,
+            )
+          : text,
     );
   }
 }
@@ -1639,6 +1646,16 @@ class _ProfileInsightPanel extends StatelessWidget {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 12),
+                  Text(
+                    strings.mobileNetworkAdvice,
+                    style: const TextStyle(color: _mutedGold, height: 1.35),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '${strings.endpointLabel}: ${profile!.endpoint}',
+                    style: const TextStyle(color: _mutedGold),
+                  ),
                 ],
               ),
           ],
@@ -1768,6 +1785,8 @@ class _WindowsToolsPanel extends StatelessWidget {
 class _SupportPanel extends StatelessWidget {
   const _SupportPanel({
     required this.strings,
+    required this.language,
+    required this.onLanguageChanged,
     required this.onSupport,
     required this.onTelegram,
     required this.onVk,
@@ -1776,6 +1795,8 @@ class _SupportPanel extends StatelessWidget {
   });
 
   final _Strings strings;
+  final _AppLanguage language;
+  final ValueChanged<_AppLanguage> onLanguageChanged;
   final VoidCallback onSupport;
   final VoidCallback onTelegram;
   final VoidCallback onVk;
@@ -1817,6 +1838,31 @@ class _SupportPanel extends StatelessWidget {
               onPressed: onDeveloper,
               icon: const Icon(Icons.mail_outline),
               label: Text(strings.developer),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Text(strings.language, style: const TextStyle(color: _mutedGold)),
+            const SizedBox(width: 12),
+            SegmentedButton<_AppLanguage>(
+              segments: const [
+                ButtonSegment(value: _AppLanguage.ru, label: Text('RU')),
+                ButtonSegment(value: _AppLanguage.en, label: Text('EN')),
+              ],
+              selected: {language},
+              showSelectedIcon: false,
+              onSelectionChanged: (value) {
+                final selected = value.isEmpty ? null : value.first;
+                if (selected != null) {
+                  onLanguageChanged(selected);
+                }
+              },
+              style: ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                minimumSize: WidgetStateProperty.all(const Size(54, 36)),
+              ),
             ),
           ],
         ),
@@ -2212,10 +2258,10 @@ class _Strings {
     protocolLabel: 'Протокол',
     networkLabel: 'Сеть',
     dnsLabel: 'DNS',
-    dnsCountryValue: 'RU напрямую, остальное VPN',
+    dnsCountryValue: 'Защищённый DNS',
     mobileReady: 'Wi‑Fi / LTE',
     mobileNetworkAdvice:
-        'Включён режим совместимости Naive: TUN MTU 1380, gVisor stack, строгий route, FakeDNS с Cloudflare DoH через VPN, fallback между Wi‑Fi/LTE и HTTPS CONNECT outbound для naive+https. Это ближе к NekoBox и твоему sing-box JSON.',
+        'Подключение настроено для стабильной работы в Wi‑Fi и мобильных сетях. DNS-запросы идут через туннель, а профиль лучше менять после полной остановки VPN.',
     endpointLabel: 'Сервер',
     connect: 'Подключить',
     disconnect: 'Отключить',
@@ -2228,7 +2274,7 @@ class _Strings {
       _FaqItem(
         question: 'Как добавить подписку или ключ?',
         answer:
-            'Нажми + вверху или в разделе профилей. Можно вставить ссылку вручную, из буфера или отсканировать QR.',
+            'Нажми + в разделе профилей. Можно вставить ссылку вручную, из буфера или отсканировать QR.',
       ),
       _FaqItem(
         question: 'Какие протоколы поддерживаются?',
@@ -2248,7 +2294,7 @@ class _Strings {
       _FaqItem(
         question: 'Почему теперь лучше работает мобильная сеть?',
         answer:
-            'Включён мобильный baseline: TUN MTU 1380, gVisor stack, strict route, IPv4-only strategy, FakeDNS + Cloudflare DoH через туннель, network fallback для Wi‑Fi/LTE и Naive через HTTPS CONNECT.',
+            'Приложение использует единый сетевой режим для Wi‑Fi и LTE: защищённый DNS, аккуратное переподключение и устойчивую маршрутизацию через туннель.',
       ),
       _FaqItem(
         question: 'Безопасно ли отправлять отчёт?',
@@ -2334,10 +2380,10 @@ class _Strings {
     protocolLabel: 'Protocol',
     networkLabel: 'Network',
     dnsLabel: 'DNS',
-    dnsCountryValue: 'RU direct, foreign via VPN',
+    dnsCountryValue: 'Protected DNS',
     mobileReady: 'Wi‑Fi / LTE',
     mobileNetworkAdvice:
-        'Naive compatibility mode is enabled: TUN MTU 1380, gVisor stack, strict routing, FakeDNS with Cloudflare DoH through VPN, Wi‑Fi/LTE network fallback, and HTTPS CONNECT outbound for naive+https. This is closer to NekoBox and your sing-box JSON.',
+        'The connection is tuned for stable Wi‑Fi and mobile networks. DNS requests stay inside the tunnel, and profiles should be switched after the VPN fully stops.',
     endpointLabel: 'Server',
     connect: 'Connect',
     disconnect: 'Disconnect',
@@ -2350,7 +2396,7 @@ class _Strings {
       _FaqItem(
         question: 'How do I add a subscription or key?',
         answer:
-            'Tap + at the top or in Profiles. You can paste manually, import from clipboard, or scan a QR code.',
+            'Use the add button in Profiles. You can paste manually, import from clipboard, or scan a QR code.',
       ),
       _FaqItem(
         question: 'Which protocols are supported?',
@@ -2370,7 +2416,7 @@ class _Strings {
       _FaqItem(
         question: 'Why should mobile networks work better now?',
         answer:
-            'The mobile baseline uses TUN MTU 1380, gVisor stack, strict routing, IPv4-only strategy, FakeDNS + Cloudflare DoH through the tunnel, Wi‑Fi/LTE network fallback, and Naive via HTTPS CONNECT.',
+            'The app uses one network baseline for Wi‑Fi and LTE: protected DNS, smoother reconnects, and stable tunnel routing.',
       ),
       _FaqItem(
         question: 'Is sending a report safe?',

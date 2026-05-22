@@ -1,78 +1,63 @@
-# Aurum VPN for Windows 11
+# Aurum VPN
 
-**Aurum VPN** is a Windows 11 VPN client built with Flutter Desktop, sing-box,
-and Wintun. The Windows version is developed separately from Android and focuses
-on a native desktop workflow: tray mode, autostart, auto-connect, split
-tunneling, GitHub Releases updates, and Windows TUN routing.
+Aurum VPN is a compact VPN client built with Flutter and sing-box. The project
+currently ships Android and Windows builds with a single gold/dark interface,
+profile import, QR support, live traffic counters, diagnostics, and support for
+VLESS Reality, VLESS TLS, NaiveProxy, Remnawave subscriptions, and raw sing-box
+JSON.
 
 > Русская версия ниже.
 
-## Highlights
+## Downloads
 
-- Windows 11 desktop client built with Flutter.
-- sing-box core with Wintun TUN mode.
-- VLESS Reality, VLESS TLS, NaiveProxy, Remnawave subscriptions, and raw
-  sing-box JSON import.
-- System tray support with show, hide, connect/disconnect, and quit actions.
-- Autostart with Windows through Task Scheduler.
-- Auto-connect to the selected profile after app launch.
-- Split tunneling by excluded `.exe` process names, including selection through
-  the Windows file picker.
-- Russian routes bypass mode: `.ru`, `.рф`, `.su`, and Russian IP ranges go
-  directly, while foreign traffic goes through the VPN.
-- Traffic counters through the sing-box Clash API.
-- Update checks through GitHub Releases.
-- Portable archive and one-file Windows installer.
+Stable builds are published on the GitHub Releases page.
 
-## Screens And UX
+Recommended release assets:
 
-The app is designed as a compact desktop control panel:
+- `AurumVPN-android-release.apk` for Android phones.
+- `AurumVPN_Setup.exe` for Windows 11 installation.
+- `AurumVPN_Windows_Portable.zip` for portable Windows usage.
 
-- profile import and selection;
-- connection status and live traffic;
-- Windows tools panel;
-- logs and diagnostics for sing-box;
-- tray-first background usage.
+## Contacts
 
-## Routing Model
+- Site: [ivan-it.net](https://ivan-it.net)
+- Support email: [ai@ivan-it.net](mailto:ai@ivan-it.net)
+- VK: [vk.com/ivan_yurievich_it](https://vk.com/ivan_yurievich_it)
+- Donate: [dzen.ru/ivanyurievich?donate=true](https://dzen.ru/ivanyurievich?donate=true)
 
-Aurum VPN uses sing-box TUN routing on Windows:
+## Features
 
-- `auto_route: true`
-- `strict_route: true`
+- Import subscriptions, QR codes, clipboard links, and manual profile links.
+- VLESS Reality, VLESS TLS, NaiveProxy, Remnawave, and sing-box JSON support.
+- Android VPN mode with foreground notification and live traffic counters.
+- Windows TUN mode with Wintun, tray support, autostart, auto-connect, and app
+  exclusions.
+- Diagnostics report with sensitive values redacted before sending.
+- Russian and English interface.
+- Gold/dark UI with the custom Aurum VPN icon.
+
+## Android Notes
+
+Android builds use sing-box TUN mode and are tuned for Wi-Fi and mobile networks:
+
 - MTU `1380`
-- `mixed` stack for Windows stability
+- gVisor stack
+- strict route
+- protected DNS through the VPN tunnel
+- local mixed proxy on `127.0.0.1:20808`
+- profile switching with explicit stop/start cleanup
+
+## Windows Notes
+
+Windows builds use sing-box TUN mode with Wintun:
+
+- MTU `1380`
+- mixed stack for Windows stability
 - local mixed proxy on `127.0.0.1:20808`
 - Clash API on `127.0.0.1:19090`
 - private IP ranges routed directly
-- Russian domains and Russian IP rule set routed directly
-- all other traffic routed through the selected VPN profile
-
-The Russian IP bypass is implemented through a remote sing-box rule set:
-
-```text
-https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs
-```
-
-## DNS
-
-Windows DNS is configured to use Cloudflare DoH through the VPN:
-
-- server: `1.1.1.1`
-- port: `443`
-- path: `/dns-query`
-- TLS SNI: `cloudflare-dns.com`
-- detour: `proxy`
-
-This avoids relying on plain DNS for remote lookups while keeping local resolver
-fallbacks for bootstrap and system compatibility.
-
-## Requirements
-
-- Windows 11 x64.
-- Administrator permissions for TUN/Wintun.
-- Flutter SDK for development builds.
-- .NET 9 SDK for rebuilding the installer.
+- optional app exclusions by `.exe` process name
+- tray actions: show, hide, connect/disconnect, and quit
 
 ## Build From Source
 
@@ -80,132 +65,109 @@ fallbacks for bootstrap and system compatibility.
 flutter pub get
 flutter analyze
 flutter test
+```
+
+Android release:
+
+```powershell
+flutter build apk --release
+```
+
+Windows release:
+
+```powershell
 flutter build windows --release
 ```
 
-The Windows app output is created at:
+## Release Checks
 
-```text
-build\windows\x64\runner\Release
+Before publishing a GitHub Release:
+
+```powershell
+flutter analyze
+flutter test
 ```
 
-## Windows Smoke Test
+For Android, verify APK signing with Android SDK `apksigner`.
 
-The repository includes a Windows QA script:
+For Windows, run:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File windows\qa\smoke_windows.ps1
-```
-
-It checks:
-
-- Flutter analysis;
-- unit tests;
-- Windows release build;
-- required runtime files;
-- sing-box version;
-- active sing-box config validation;
-- portable archive contents;
-- installer publishing;
-- SHA256 hashes for release artifacts.
-
-## Release Artifacts
-
-Do not commit generated `.exe` and `.zip` artifacts into git. Publish them on
-the GitHub **Releases** page instead.
-
-Recommended release files:
-
-- `AurumVPN_Setup.exe`
-- `AurumVPN_Windows_Portable.zip`
-
-## Project Structure
-
-```text
-lib/                         Flutter app and VPN logic
-windows/                     Windows runner, installer, and QA scripts
-assets/windows/sing-box/     sing-box, Wintun, Cronet runtime files
-test/                        Unit tests
-plugins/flutter_singbox_vpn/ Local plugin code used by the app
 ```
 
 ## Security Notes
 
 - Do not commit real VPN profile links, UUIDs, passwords, private keys, or
   production configs.
-- The app redacts sensitive values in diagnostic reports.
-- Windows TUN mode requires administrator privileges.
+- Generated release binaries belong on GitHub Releases, not in git history.
+- Diagnostic reports redact passwords, UUIDs, and keys.
+- Android and Windows VPN/TUN modes require OS-level VPN/network permissions.
 
 ## License
 
-No project license has been selected yet. Runtime components keep their own
-licenses inside `assets/windows/sing-box`.
+No project license has been selected yet. Bundled runtime components keep their
+own licenses in their source directories.
 
 ---
 
-# Aurum VPN для Windows 11
+# Aurum VPN на русском
 
-**Aurum VPN** - это VPN-клиент для Windows 11 на Flutter Desktop, sing-box и
-Wintun. Windows-версия разрабатывается отдельно от Android и заточена под
-нормальный desktop-сценарий: трей, автозапуск, автоподключение, split
-tunneling, обновления через GitHub Releases и Windows TUN-маршрутизацию.
+Aurum VPN - компактный VPN-клиент на Flutter и sing-box. Сейчас проект собирает
+Android и Windows версии в едином золотом стиле: импорт профилей, QR, буфер,
+счетчики трафика, диагностика, VLESS Reality, VLESS TLS, NaiveProxy, Remnawave
+подписки и raw sing-box JSON.
+
+## Скачать
+
+Стабильные сборки публикуются на странице GitHub Releases.
+
+Рекомендуемые файлы релиза:
+
+- `AurumVPN-android-release.apk` для Android.
+- `AurumVPN_Setup.exe` для установки на Windows 11.
+- `AurumVPN_Windows_Portable.zip` для portable-версии Windows.
+
+## Контакты
+
+- Сайт: [ivan-it.net](https://ivan-it.net)
+- Почта поддержки: [ai@ivan-it.net](mailto:ai@ivan-it.net)
+- VK: [vk.com/ivan_yurievich_it](https://vk.com/ivan_yurievich_it)
+- Донат: [dzen.ru/ivanyurievich?donate=true](https://dzen.ru/ivanyurievich?donate=true)
 
 ## Возможности
 
-- Нативное Windows 11 приложение на Flutter.
-- VPN-ядро sing-box с Wintun TUN-режимом.
-- Импорт VLESS Reality, VLESS TLS, NaiveProxy, Remnawave подписок и raw
-  sing-box JSON.
-- Иконка в трее: открыть, скрыть, подключить/отключить, выйти.
-- Автостарт вместе с Windows через планировщик задач.
-- Автоподключение выбранного профиля после запуска приложения.
-- Split tunneling по `.exe` процессам, включая выбор приложения через
-  проводник Windows.
-- Режим обхода российских адресов: `.ru`, `.рф`, `.su` и российские IP идут
-  напрямую, иностранный трафик идет через VPN.
-- Счетчики трафика через sing-box Clash API.
-- Проверка обновлений через GitHub Releases.
-- Portable-архив и Windows-установщик одним `.exe` файлом.
+- Импорт подписок, QR-кодов, ссылок из буфера и ручной ввод.
+- Поддержка VLESS Reality, VLESS TLS, NaiveProxy, Remnawave и sing-box JSON.
+- Android VPN-режим со шторкой уведомления и счетчиками трафика.
+- Windows TUN-режим с Wintun, треем, автостартом, автоподключением и
+  исключениями приложений.
+- Отчет диагностики с автоматическим скрытием чувствительных данных.
+- Интерфейс на русском и английском.
+- Золотой дизайн и фирменная иконка Aurum VPN.
 
-## Как работает маршрутизация
+## Android
 
-На Windows Aurum VPN использует sing-box TUN:
+Android-сборка использует sing-box TUN и настроена для Wi-Fi и мобильных сетей:
 
-- `auto_route: true`
-- `strict_route: true`
 - MTU `1380`
-- Windows stack `mixed`
+- gVisor stack
+- strict route
+- защищенный DNS через VPN-туннель
+- локальный mixed proxy `127.0.0.1:20808`
+- переключение профилей через аккуратную остановку и запуск
+
+## Windows
+
+Windows-сборка использует sing-box TUN с Wintun:
+
+- MTU `1380`
+- mixed stack для стабильности Windows
 - локальный mixed proxy `127.0.0.1:20808`
 - Clash API `127.0.0.1:19090`
 - приватные IP идут напрямую
-- российские домены и российский IP rule set идут напрямую
-- весь остальной трафик идет через выбранный VPN-профиль
-
-Российские IP определяются через удаленный rule set sing-box:
-
-```text
-https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs
-```
-
-## DNS
-
-На Windows DNS настроен через Cloudflare DoH внутри VPN:
-
-- сервер: `1.1.1.1`
-- порт: `443`
-- путь: `/dns-query`
-- TLS SNI: `cloudflare-dns.com`
-- detour: `proxy`
-
-Так DNS-запросы уходят через туннель, а локальный DNS остается только для
-bootstrap/совместимости системы.
-
-## Требования
-
-- Windows 11 x64.
-- Права администратора для TUN/Wintun.
-- Flutter SDK для сборки из исходников.
-- .NET 9 SDK для пересборки установщика.
+- исключения приложений по имени `.exe`
+- трей: открыть, скрыть, подключить/отключить и выйти
 
 ## Сборка
 
@@ -213,38 +175,39 @@ bootstrap/совместимости системы.
 flutter pub get
 flutter analyze
 flutter test
+```
+
+Android release:
+
+```powershell
+flutter build apk --release
+```
+
+Windows release:
+
+```powershell
 flutter build windows --release
 ```
 
-Готовая Windows-сборка появляется здесь:
+## Перед публикацией релиза
 
-```text
-build\windows\x64\runner\Release
+```powershell
+flutter analyze
+flutter test
 ```
 
-## Smoke-тест Windows
+Для Android проверь подпись APK через Android SDK `apksigner`.
+
+Для Windows:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File windows\qa\smoke_windows.ps1
 ```
 
-Скрипт проверяет анализ, тесты, Windows build, runtime-файлы, sing-box,
-portable-архив, публикацию установщика и SHA256 хэши.
-
-## Релизы
-
-Готовые `.exe` и `.zip` файлы лучше не коммитить в git. Загружай их на страницу
-GitHub **Releases**.
-
-Рекомендуемые файлы релиза:
-
-- `AurumVPN_Setup.exe`
-- `AurumVPN_Windows_Portable.zip`
-
 ## Безопасность
 
 - Не коммить реальные VPN-ссылки, UUID, пароли, приватные ключи и рабочие
   конфиги.
-- Диагностические отчеты в приложении скрывают чувствительные данные.
-- Windows TUN-режим требует запуска с правами администратора.
-
+- Готовые `.apk`, `.exe` и `.zip` файлы загружай на GitHub Releases, а не в git.
+- Диагностические отчеты скрывают пароли, UUID и ключи.
+- Android и Windows VPN/TUN режимы требуют системных VPN/сетевых разрешений.

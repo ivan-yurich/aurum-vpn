@@ -1,0 +1,54 @@
+name: Bug report
+description: Report an Aurum VPN problem
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Aurum VPN. Do not paste real passwords,
+        UUIDs, private keys, or full subscription links.
+  - type: input
+    id: version
+    attributes:
+      label: App version
+      placeholder: "1.0.9"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Android
+        - Windows
+    validations:
+      required: true
+  - type: dropdown
+    id: protocol
+    attributes:
+      label: Protocol
+      options:
+        - VLESS Reality
+        - VLESS TLS
+        - NaiveProxy
+        - Remnawave subscription
+        - sing-box JSON
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the issue and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Paste the app diagnostic report with secrets redacted.
+      render: text
+    validations:
+      required: false

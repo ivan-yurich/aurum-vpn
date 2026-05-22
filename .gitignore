@@ -47,8 +47,7 @@ migrate_working_dir/
 *.pdb
 !/assets/windows/sing-box/sing-box.exe
 
-# This repository publishes the Windows edition only
-/android/
+# Platform folders that are not part of the current public source snapshot
 /ios/
 /linux/
 /macos/
@@ -70,6 +69,7 @@ app.*.map.json
 
 # Release signing secrets
 /android/key.properties
+/android/local.properties
 /android/upload-keystore.jks
 /android/app/upload-keystore.jks
 *.jks

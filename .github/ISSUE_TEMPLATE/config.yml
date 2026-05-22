@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Email support
+    url: mailto:ai@ivan-it.net
+    about: Private support and security-sensitive reports.
+  - name: VK group
+    url: https://vk.com/ivan_yurievich_it
+    about: Community updates and questions.
+  - name: Donate
+    url: https://dzen.ru/ivanyurievich?donate=true
+    about: Support project development.
