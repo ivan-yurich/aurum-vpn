@@ -162,12 +162,16 @@ class SingBoxConfigBuilder {
     }
 
     final originalTls = (proxyOutbound['tls'] as Map?)?.cast<String, dynamic>();
-    proxyOutbound['type'] = 'http';
-    proxyOutbound.remove('extra_headers');
-    proxyOutbound.remove('insecure_concurrency');
-    proxyOutbound.remove('quic');
-    proxyOutbound.remove('quic_congestion_control');
-    proxyOutbound.remove('udp_over_tcp');
+    final outboundType = (proxyOutbound['type'] as String?)?.toLowerCase();
+    if (outboundType != 'http') {
+      proxyOutbound['type'] = 'naive';
+    } else {
+      proxyOutbound.remove('extra_headers');
+      proxyOutbound.remove('insecure_concurrency');
+      proxyOutbound.remove('quic');
+      proxyOutbound.remove('quic_congestion_control');
+      proxyOutbound.remove('udp_over_tcp');
+    }
 
     final normalizedTls = <String, dynamic>{};
     for (final key in const [

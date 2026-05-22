@@ -32,7 +32,7 @@ void main() {
     expect(profiles.first.kind, VpnProfileKind.naive);
     expect(profiles.first.outbound?['username'], 'example.com');
     expect(profiles.first.outbound?['password'], 'pass');
-    expect(proxy['type'], 'http');
+    expect(proxy['type'], 'naive');
     expect(proxy['tls'], {'enabled': true, 'server_name': 'example.com'});
     final dnsServers =
         (config['dns'] as Map<String, dynamic>)['servers'] as List;
@@ -161,7 +161,7 @@ void main() {
     expect(proxy['udp_over_tcp'], isNull);
   });
 
-  test('normalizes legacy Naive TLS fields from saved profiles', () {
+  test('keeps native Naive outbound and normalizes TLS fields', () {
     const profile = VpnProfile(
       id: 'legacy-naive',
       name: 'Legacy Naive',
@@ -188,9 +188,31 @@ void main() {
             as Map<String, dynamic>;
     final proxy = (config['outbounds'] as List).first as Map<String, dynamic>;
 
-    expect(proxy['type'], 'http');
+    expect(proxy['type'], 'naive');
     expect(proxy['tls'], {'server_name': 'example.com', 'enabled': true});
   });
+
+  test(
+    'imports go-it style NaiveProxy link as native Naive outbound',
+    () async {
+      const link = 'naive+https://ivan:secret-for-test@go-it.tech:443';
+
+      final profile = (await ProfileImporter().importFromText(link)).first;
+      final config =
+          jsonDecode(SingBoxConfigBuilder().build(profile))
+              as Map<String, dynamic>;
+      final proxy = (config['outbounds'] as List).first as Map<String, dynamic>;
+
+      expect(profile.kind, VpnProfileKind.naive);
+      expect(profile.server, 'go-it.tech');
+      expect(proxy['type'], 'naive');
+      expect(proxy['server'], 'go-it.tech');
+      expect(proxy['server_port'], 443);
+      expect(proxy['username'], 'ivan');
+      expect(proxy['password'], 'secret-for-test');
+      expect(proxy['tls'], {'enabled': true, 'server_name': 'go-it.tech'});
+    },
+  );
 
   test('normalizes legacy VLESS tcp-only outbounds from saved profiles', () {
     const profile = VpnProfile(

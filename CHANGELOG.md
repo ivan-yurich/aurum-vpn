@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.10 - 2026-05-23
+
+- Fixed `naive+https://` profile generation on Android by using sing-box native
+  NaiveProxy outbound instead of forcing the link into generic HTTP CONNECT.
+- Added regression coverage for go-it style NaiveProxy links.
+
 ## 1.0.9 - 2026-05-23
 
 ### Android
