@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.11 - 2026-05-23
+
+- Added NaiveProxy startup fallback between native Naive and HTTPS CONNECT
+  modes, with a real mixed-proxy health check before the connection is accepted.
+- Added import support for standalone sing-box outbound JSON such as
+  `type: http` / `type: naive` NaiveProxy configs.
+- Improved VPN stop timing and status watchdog checks for long-running sessions
+  and profile switching.
+- Removed technical app text that referenced other clients.
+
 ## 1.0.10 - 2026-05-23
 
 - Fixed `naive+https://` profile generation on Android by using sing-box native

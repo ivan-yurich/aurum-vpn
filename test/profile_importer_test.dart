@@ -159,6 +159,21 @@ void main() {
     expect(proxy['quic'], isNull);
     expect(proxy['quic_congestion_control'], isNull);
     expect(proxy['udp_over_tcp'], isNull);
+
+    final httpFallbackConfig =
+        jsonDecode(
+              SingBoxConfigBuilder().build(
+                profiles.first,
+                naiveMode: NaiveOutboundMode.httpConnect,
+              ),
+            )
+            as Map<String, dynamic>;
+    final httpFallbackProxy =
+        (httpFallbackConfig['outbounds'] as List).first as Map<String, dynamic>;
+    expect(httpFallbackProxy['type'], 'http');
+    expect(httpFallbackProxy['server'], 'example.com');
+    expect(httpFallbackProxy['username'], 'example.com');
+    expect(httpFallbackProxy['password'], 'pass');
   });
 
   test('keeps native Naive outbound and normalizes TLS fields', () {
@@ -213,6 +228,72 @@ void main() {
       expect(proxy['tls'], {'enabled': true, 'server_name': 'go-it.tech'});
     },
   );
+
+  test(
+    'imports n8n style NaiveProxy link and supports HTTP CONNECT fallback',
+    () async {
+      const link =
+          'naive+https://n8n-cloud.online:secret-for-test@n8n-cloud.online:443';
+
+      final profile = (await ProfileImporter().importFromText(link)).first;
+      final nativeConfig =
+          jsonDecode(SingBoxConfigBuilder().build(profile))
+              as Map<String, dynamic>;
+      final nativeProxy =
+          (nativeConfig['outbounds'] as List).first as Map<String, dynamic>;
+      final httpConfig =
+          jsonDecode(
+                SingBoxConfigBuilder().build(
+                  profile,
+                  naiveMode: NaiveOutboundMode.httpConnect,
+                ),
+              )
+              as Map<String, dynamic>;
+      final httpProxy =
+          (httpConfig['outbounds'] as List).first as Map<String, dynamic>;
+
+      expect(profile.kind, VpnProfileKind.naive);
+      expect(profile.server, 'n8n-cloud.online');
+      expect(nativeProxy['type'], 'naive');
+      expect(httpProxy['type'], 'http');
+      expect(httpProxy['server'], 'n8n-cloud.online');
+      expect(httpProxy['server_port'], 443);
+      expect(httpProxy['username'], 'n8n-cloud.online');
+      expect(httpProxy['password'], 'secret-for-test');
+      expect(httpProxy['tls'], {
+        'enabled': true,
+        'server_name': 'n8n-cloud.online',
+      });
+    },
+  );
+
+  test('imports standalone sing-box HTTP outbound for NaiveProxy', () async {
+    final payload = jsonEncode({
+      'type': 'http',
+      'tag': 'naiveproxy-out',
+      'server': 'n8n-cloud.online',
+      'server_port': 443,
+      'username': 'n8n-cloud.online',
+      'password': 'secret-for-test',
+      'tls': {'enabled': true, 'server_name': 'n8n-cloud.online'},
+    });
+
+    final profile = (await ProfileImporter().importFromText(payload)).first;
+    final config =
+        jsonDecode(SingBoxConfigBuilder().build(profile))
+            as Map<String, dynamic>;
+    final proxy = (config['outbounds'] as List).first as Map<String, dynamic>;
+
+    expect(profile.kind, VpnProfileKind.naive);
+    expect(profile.name, 'n8n-cloud.online');
+    expect(proxy['type'], 'http');
+    expect(proxy['tag'], 'proxy');
+    expect(proxy['server'], 'n8n-cloud.online');
+    expect(proxy['server_port'], 443);
+    expect(proxy['username'], 'n8n-cloud.online');
+    expect(proxy['password'], 'secret-for-test');
+    expect(proxy['tls'], {'server_name': 'n8n-cloud.online', 'enabled': true});
+  });
 
   test('normalizes legacy VLESS tcp-only outbounds from saved profiles', () {
     const profile = VpnProfile(

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -24,7 +25,14 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.10';
+const _appVersion = '1.0.11';
+
+class _ConnectionConfigPlan {
+  const _ConnectionConfigPlan(this.naiveMode, this.label);
+
+  final NaiveOutboundMode naiveMode;
+  final String label;
+}
 
 enum _AppLanguage {
   ru('ru'),
@@ -60,6 +68,7 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription<Map<String, dynamic>>? _trafficSubscription;
   StreamSubscription<Map<String, dynamic>>? _logSubscription;
   Timer? _logFlushTimer;
+  Timer? _statusWatchdogTimer;
   DateTime? _ignoreStoppedUntil;
 
   List<VpnProfile> _profiles = const [];
@@ -96,6 +105,10 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _load();
     _initVpn();
+    _statusWatchdogTimer = Timer.periodic(
+      const Duration(seconds: 20),
+      (_) => unawaited(_refreshStatusWatchdog()),
+    );
   }
 
   @override
@@ -104,6 +117,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _trafficSubscription?.cancel();
     _logSubscription?.cancel();
     _logFlushTimer?.cancel();
+    _statusWatchdogTimer?.cancel();
     _manualController.dispose();
     unawaited(_vpnEngine.dispose());
     super.dispose();
@@ -403,52 +417,77 @@ class _HomeScreenState extends State<HomeScreen> {
     _lastError = null;
     await _vpnEngine.clearLogs();
 
-    final config = _configBuilder.build(profile);
-    final configSummary = _summarizeSingBoxConfig(
-      config,
-      target: _vpnEngine.configTarget,
-    );
-    final saved = await _vpnEngine.saveConfig(config);
-    if (!saved) {
-      throw StateError(s.configSaveFailed);
-    }
     await _vpnEngine.requestNotificationPermission();
 
     Object? lastStartError;
     var connected = false;
-    for (var attempt = 1; attempt <= 2; attempt += 1) {
-      if (mounted) {
-        setState(() {
-          _selectedProfileId = profile.id;
-          _lastError = null;
-          _message = s.connectingStatus(profile.name);
-          _uplink = '0 B/s';
-          _downlink = '0 B/s';
-          _sessionTotal = '0 B';
-          _lastConfigSummary = configSummary;
-        });
+    final plans = _connectionPlans(profile);
+
+    for (
+      var planIndex = 0;
+      planIndex < plans.length && !connected;
+      planIndex += 1
+    ) {
+      final plan = plans[planIndex];
+      final config = _configBuilder.build(profile, naiveMode: plan.naiveMode);
+      final configSummary = _summarizeSingBoxConfig(
+        config,
+        target: _vpnEngine.configTarget,
+      );
+      final saved = await _vpnEngine.saveConfig(config);
+      if (!saved) {
+        throw StateError(s.configSaveFailed);
       }
 
-      final started = await _vpnEngine.startVPN();
-      if (started) {
-        final finalStatus = await _waitForVpnStatus({
-          AurumVpnStatus.started,
-        }, timeout: const Duration(seconds: 14));
-        if (finalStatus == AurumVpnStatus.started) {
-          connected = true;
-          break;
+      for (var attempt = 1; attempt <= 2 && !connected; attempt += 1) {
+        if (mounted) {
+          setState(() {
+            _selectedProfileId = profile.id;
+            _lastError = null;
+            _message = plans.length > 1
+                ? '${s.connectingStatus(profile.name)} · ${plan.label}'
+                : s.connectingStatus(profile.name);
+            _uplink = '0 B/s';
+            _downlink = '0 B/s';
+            _sessionTotal = '0 B';
+            _lastConfigSummary = configSummary;
+          });
         }
-        lastStartError = s.vpnNotConnected(finalStatus);
-      } else {
-        lastStartError = s.vpnStartFailed;
+
+        final started = await _vpnEngine.startVPN();
+        if (started) {
+          final finalStatus = await _waitForVpnStatus({
+            AurumVpnStatus.started,
+          }, timeout: const Duration(seconds: 14));
+          if (finalStatus == AurumVpnStatus.started) {
+            if (profile.kind != VpnProfileKind.naive ||
+                await _probeLocalMixedProxy()) {
+              connected = true;
+              break;
+            }
+            lastStartError = s.connectionProbeFailed;
+          } else {
+            lastStartError = s.vpnNotConnected(finalStatus);
+          }
+        } else {
+          lastStartError = s.vpnStartFailed;
+        }
+
+        if (!connected) {
+          _queueLog(
+            'VPN start retry [$attempt/${plan.label}]: '
+            '${_redactSensitive('$lastStartError')}',
+          );
+          await _stopVpnCore(updateMessage: false);
+          await Future<void>.delayed(const Duration(milliseconds: 1600));
+          await _vpnEngine.saveConfig(config);
+          _ignoreStoppedUntil = DateTime.now().add(const Duration(seconds: 14));
+        }
       }
 
-      if (attempt == 1) {
-        _queueLog('VPN start retry: ${_redactSensitive('$lastStartError')}');
-        await _stopVpnCore(updateMessage: false);
-        await Future<void>.delayed(const Duration(milliseconds: 1600));
-        await _vpnEngine.saveConfig(config);
-        _ignoreStoppedUntil = DateTime.now().add(const Duration(seconds: 14));
+      if (!connected && planIndex < plans.length - 1) {
+        _queueLog('Naive mode fallback: ${plan.label} did not pass probe.');
+        await Future<void>.delayed(const Duration(milliseconds: 800));
       }
     }
 
@@ -481,16 +520,16 @@ class _HomeScreenState extends State<HomeScreen> {
       final status = await _refreshVpnStatus();
       if (status != AurumVpnStatus.stopped) {
         await _vpnEngine.stopVPN().timeout(
-          const Duration(seconds: 5),
+          const Duration(seconds: 7),
           onTimeout: () => true,
         );
         final stoppedStatus = await _waitForVpnStatus({
           AurumVpnStatus.stopped,
-        }, timeout: const Duration(seconds: 8));
+        }, timeout: const Duration(seconds: 14));
         if (stoppedStatus != AurumVpnStatus.stopped) {
           _queueLog('VPN stop cleanup is still finishing: $stoppedStatus');
         }
-        await Future<void>.delayed(const Duration(milliseconds: 700));
+        await Future<void>.delayed(const Duration(milliseconds: 1200));
       }
 
       if (mounted) {
@@ -536,6 +575,94 @@ class _HomeScreenState extends State<HomeScreen> {
       await Future<void>.delayed(const Duration(milliseconds: 300));
     }
     return latest;
+  }
+
+  Future<void> _refreshStatusWatchdog() async {
+    if (!mounted || _busy) {
+      return;
+    }
+
+    final previous = _status;
+    final status = await _refreshVpnStatus();
+    final ignoreStopped =
+        _ignoreStoppedUntil != null &&
+        DateTime.now().isBefore(_ignoreStoppedUntil!);
+    if (previous == AurumVpnStatus.started &&
+        status == AurumVpnStatus.stopped &&
+        !_stoppingByUser &&
+        !ignoreStopped &&
+        mounted) {
+      setState(() {
+        _lastError = s.vpnStoppedUnexpectedly;
+        _message = s.openLogsMessage;
+      });
+    }
+  }
+
+  List<_ConnectionConfigPlan> _connectionPlans(VpnProfile profile) {
+    if (profile.kind != VpnProfileKind.naive) {
+      return const [_ConnectionConfigPlan(NaiveOutboundMode.auto, 'auto')];
+    }
+
+    final outboundType = (profile.outbound?['type'] as String?)?.toLowerCase();
+    if (outboundType == 'http') {
+      return const [
+        _ConnectionConfigPlan(NaiveOutboundMode.httpConnect, 'https-connect'),
+        _ConnectionConfigPlan(NaiveOutboundMode.native, 'native-naive'),
+      ];
+    }
+
+    return const [
+      _ConnectionConfigPlan(NaiveOutboundMode.native, 'native-naive'),
+      _ConnectionConfigPlan(NaiveOutboundMode.httpConnect, 'https-connect'),
+    ];
+  }
+
+  Future<bool> _probeLocalMixedProxy() async {
+    final endpoints = [
+      Uri.https('cp.cloudflare.com', '/generate_204'),
+      Uri.https('www.gstatic.com', '/generate_204'),
+    ];
+
+    for (var attempt = 1; attempt <= 2; attempt += 1) {
+      for (final endpoint in endpoints) {
+        final client = HttpClient()
+          ..connectionTimeout = const Duration(seconds: 5)
+          ..findProxy = (_) =>
+              'PROXY 127.0.0.1:${SingBoxConfigBuilder.localMixedProxyPort}';
+        try {
+          final request = await client
+              .getUrl(endpoint)
+              .timeout(const Duration(seconds: 5));
+          request.headers.set(
+            HttpHeaders.userAgentHeader,
+            'AurumVPN/$_appVersion',
+          );
+          request.followRedirects = false;
+          final response = await request.close().timeout(
+            const Duration(seconds: 7),
+          );
+          await response.drain<void>().timeout(
+            const Duration(seconds: 3),
+            onTimeout: () {},
+          );
+          if (response.statusCode >= 200 && response.statusCode < 400) {
+            return true;
+          }
+          _queueLog('VPN health probe HTTP ${response.statusCode}: $endpoint');
+        } on Object catch (error) {
+          _queueLog('VPN health probe failed: ${_redactSensitive('$error')}');
+        } finally {
+          client.close(force: true);
+        }
+      }
+
+      if (attempt == 1) {
+        await Future<void>.delayed(const Duration(milliseconds: 700));
+      }
+    }
+
+    return false;
   }
 
   Future<void> _setLanguage(_AppLanguage language) async {
@@ -781,6 +908,9 @@ class _HomeScreenState extends State<HomeScreen> {
         'stack=${tun['stack'] ?? 'unknown'}',
         'network=${proxy['network_strategy'] ?? 'default'}',
         if (proxy['type'] == 'http') 'mode=https-connect',
+        if (proxy['type'] == 'naive') 'mode=naive-native',
+        if (proxy['type'] == 'http' || proxy['type'] == 'naive')
+          'health_probe=mixed-proxy',
         if (proxy['type'] != 'http') 'quic=${proxy['quic'] ?? 'auto'}',
         'mixed_proxy=$hasMixedProxy',
       ].join('; ');
@@ -1489,6 +1619,7 @@ class _Strings {
     required this.importFirst,
     required this.configSaveFailed,
     required this.vpnStartFailed,
+    required this.connectionProbeFailed,
     required this.disconnectingVpn,
     required this.vpnStopServiceFailed,
     required this.vpnStopped,
@@ -1547,6 +1678,7 @@ class _Strings {
   final String importFirst;
   final String configSaveFailed;
   final String vpnStartFailed;
+  final String connectionProbeFailed;
   final String disconnectingVpn;
   final String vpnStopServiceFailed;
   final String vpnStopped;
@@ -1657,6 +1789,8 @@ class _Strings {
     importFirst: 'Сначала импортируй профиль.',
     configSaveFailed: 'sing-box не сохранил config.',
     vpnStartFailed: 'VPN не стартовал. Открой логи ниже.',
+    connectionProbeFailed:
+        'VPN запустился, но проверка интернета через туннель не прошла.',
     disconnectingVpn: 'Отключаю VPN...',
     vpnStopServiceFailed: 'VPN-сервис не смог полностью остановиться.',
     vpnStopped: 'VPN остановлен',
@@ -1697,7 +1831,7 @@ class _Strings {
     dnsCountryValue: 'Защищённый DNS',
     mobileReady: 'Wi‑Fi / LTE',
     mobileNetworkAdvice:
-        'Подключение настроено для стабильной работы в Wi‑Fi и мобильных сетях. DNS-запросы идут через туннель, а профиль лучше менять после полной остановки VPN.',
+        'Подключение настроено для стабильной работы в Wi‑Fi и мобильных сетях. DNS-запросы идут через туннель, а при смене профиля приложение полностью пересобирает конфиг.',
     endpointLabel: 'Сервер',
     connect: 'Подключить',
     disconnect: 'Отключить',
@@ -1750,6 +1884,8 @@ class _Strings {
     importFirst: 'Import a profile first.',
     configSaveFailed: 'sing-box did not save the config.',
     vpnStartFailed: 'VPN did not start. Check the logs below.',
+    connectionProbeFailed:
+        'VPN started, but the tunnel internet probe did not pass.',
     disconnectingVpn: 'Disconnecting VPN...',
     vpnStopServiceFailed: 'VPN service could not fully stop.',
     vpnStopped: 'VPN stopped',
@@ -1789,7 +1925,7 @@ class _Strings {
     dnsCountryValue: 'Protected DNS',
     mobileReady: 'Wi‑Fi / LTE',
     mobileNetworkAdvice:
-        'The connection is tuned for stable Wi‑Fi and mobile networks. DNS requests stay inside the tunnel, and profiles should be switched after the VPN fully stops.',
+        'The connection is tuned for stable Wi‑Fi and mobile networks. DNS requests stay inside the tunnel, and the app rebuilds the config when switching profiles.',
     endpointLabel: 'Server',
     connect: 'Connect',
     disconnect: 'Disconnect',

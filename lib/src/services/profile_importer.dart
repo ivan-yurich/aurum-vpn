@@ -38,7 +38,6 @@ class ProfileImporter {
     final clients = [
       'sing-box/1.13.11 (Android; IvanVPN)',
       'HiddifyNext/2.5.7',
-      'NekoBoxForAndroid/1.3.8',
       'v2rayNG/1.10.5',
     ];
 
@@ -196,9 +195,68 @@ class ProfileImporter {
             rawConfig: const JsonEncoder.withIndent('  ').convert(decoded),
           );
         }
+
+        final outboundProfile = _profileFromSingBoxOutbound(
+          decoded,
+          originalText: text,
+          source: source,
+        );
+        if (outboundProfile != null) {
+          return outboundProfile;
+        }
       }
     } on FormatException {
       return null;
+    }
+
+    return null;
+  }
+
+  VpnProfile? _profileFromSingBoxOutbound(
+    Map<String, dynamic> outbound, {
+    required String originalText,
+    required String source,
+  }) {
+    final type = (outbound['type'] as String?)?.toLowerCase();
+    final server = outbound['server'] as String?;
+    if (type == null || server == null || server.isEmpty) {
+      return null;
+    }
+
+    final port =
+        _asInt(outbound['server_port']) ?? _asInt(outbound['port']) ?? 443;
+    final normalized = jsonDecode(jsonEncode(outbound)) as Map<String, dynamic>;
+    normalized['server_port'] = port;
+
+    if (type == 'http' || type == 'naive') {
+      return VpnProfile(
+        id: _stableId(originalText),
+        name: _displayName('', fallback: server),
+        kind: VpnProfileKind.naive,
+        originalInput: source.isEmpty ? originalText : source,
+        server: server,
+        port: port,
+        outbound: normalized,
+      );
+    }
+
+    if (type == 'vless') {
+      final tls = _asMap(normalized['tls']);
+      final reality = _asMap(tls?['reality']);
+      final hasReality =
+          reality != null &&
+          (reality['enabled'] == true || _truthy('${reality['enabled']}'));
+      return VpnProfile(
+        id: _stableId(originalText),
+        name: _displayName('', fallback: server),
+        kind: hasReality
+            ? VpnProfileKind.vlessReality
+            : VpnProfileKind.vlessTls,
+        originalInput: source.isEmpty ? originalText : source,
+        server: server,
+        port: port,
+        outbound: normalized,
+      );
     }
 
     return null;
