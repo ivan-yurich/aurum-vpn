@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.12 - 2026-05-23
+
+- Improved NaiveProxy health checks for servers where CONNECT to IP targets
+  works but server-side DNS resolution is broken or slow.
+- Kept domain probes first, then falls back to an IP probe so valid TUN
+  profiles are not rejected too early during startup.
+
 ## 1.0.11 - 2026-05-23
 
 - Added NaiveProxy startup fallback between native Naive and HTTPS CONNECT

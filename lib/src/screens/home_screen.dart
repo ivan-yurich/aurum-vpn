@@ -25,7 +25,7 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.11';
+const _appVersion = '1.0.12';
 
 class _ConnectionConfigPlan {
   const _ConnectionConfigPlan(this.naiveMode, this.label);
@@ -619,20 +619,33 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<bool> _probeLocalMixedProxy() async {
-    final endpoints = [
-      Uri.https('cp.cloudflare.com', '/generate_204'),
-      Uri.https('www.gstatic.com', '/generate_204'),
+    final endpoints = <({Uri uri, bool allowCertificateMismatch})>[
+      (
+        uri: Uri.https('cp.cloudflare.com', '/generate_204'),
+        allowCertificateMismatch: false,
+      ),
+      (
+        uri: Uri.https('www.gstatic.com', '/generate_204'),
+        allowCertificateMismatch: false,
+      ),
+      // Some Naive servers have broken resolver settings but still proxy IP
+      // targets correctly. This probe keeps startup from rejecting such
+      // profiles while server-side DNS is being repaired.
+      (uri: Uri.https('1.1.1.1', '/'), allowCertificateMismatch: true),
     ];
 
     for (var attempt = 1; attempt <= 2; attempt += 1) {
       for (final endpoint in endpoints) {
         final client = HttpClient()
           ..connectionTimeout = const Duration(seconds: 5)
+          ..badCertificateCallback = endpoint.allowCertificateMismatch
+              ? (_, host, _) => host == endpoint.uri.host
+              : null
           ..findProxy = (_) =>
               'PROXY 127.0.0.1:${SingBoxConfigBuilder.localMixedProxyPort}';
         try {
           final request = await client
-              .getUrl(endpoint)
+              .getUrl(endpoint.uri)
               .timeout(const Duration(seconds: 5));
           request.headers.set(
             HttpHeaders.userAgentHeader,
@@ -649,7 +662,9 @@ class _HomeScreenState extends State<HomeScreen> {
           if (response.statusCode >= 200 && response.statusCode < 400) {
             return true;
           }
-          _queueLog('VPN health probe HTTP ${response.statusCode}: $endpoint');
+          _queueLog(
+            'VPN health probe HTTP ${response.statusCode}: ${endpoint.uri}',
+          );
         } on Object catch (error) {
           _queueLog('VPN health probe failed: ${_redactSensitive('$error')}');
         } finally {
