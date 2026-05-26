@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.23 - 2026-05-26
+
+- Fixed Android in-app update installation by registering the APK
+  `FileProvider` and exposing the app cache directory used for downloaded
+  update files.
+- Switched the updater installer intent to Android's package install action for
+  a more reliable handoff after the user allows installs from Aurum VPN.
+
 ## 1.0.22 - 2026-05-26
 
 - Moved the main connect/disconnect button directly under the connection status

@@ -50,14 +50,16 @@ class MainActivity : FlutterActivity() {
             return
         }
 
-        val uri = FileProvider.getUriForFile(this, "$packageName.cache", apkFile)
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "application/vnd.android.package-archive")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-
         try {
+            val uri = FileProvider.getUriForFile(this, "$packageName.cache", apkFile)
+            val intent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
+                data = uri
+                putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
+                putExtra(Intent.EXTRA_RETURN_RESULT, true)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+
             startActivity(intent)
             result.success(null)
         } catch (error: Exception) {
