@@ -8,6 +8,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/vpn_profile.dart';
+import '../services/app_update_service.dart';
 import '../services/profile_importer.dart';
 import '../services/profile_store.dart';
 import '../services/sing_box_config_builder.dart';
@@ -25,7 +26,7 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.12';
+const _appVersion = '1.0.24';
 
 class _ConnectionConfigPlan {
   const _ConnectionConfigPlan(this.naiveMode, this.label);
@@ -62,6 +63,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final _store = ProfileStore();
   final _importer = ProfileImporter();
   final _configBuilder = SingBoxConfigBuilder();
+  final _updateService = AppUpdateService();
   final _manualController = TextEditingController();
 
   StreamSubscription<Map<String, dynamic>>? _statusSubscription;
@@ -81,8 +83,12 @@ class _HomeScreenState extends State<HomeScreen> {
   String _message = 'Готов к импорту подписки';
   String? _lastError;
   bool _busy = false;
+  bool _updateBusy = false;
   bool _stoppingByUser = false;
+  bool _logsExpanded = false;
   String? _lastConfigSummary;
+  String? _updateMessage;
+  double? _updateProgress;
   final _logs = <String>[];
   final _pendingLogs = <String>[];
 
@@ -191,17 +197,6 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     });
 
-    _logSubscription = _vpnEngine.onLogMessage.listen((event) {
-      if (!mounted || event['type'] != 'log') {
-        return;
-      }
-      final message = event['message'] as String?;
-      if (message == null || message.isEmpty) {
-        return;
-      }
-      _queueLog(message);
-    });
-
     try {
       await _vpnEngine.setNotificationTitle(_appName);
       await _vpnEngine.setNotificationDescription(s.notificationDescription);
@@ -251,78 +246,92 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _showImportSheet() async {
-    await showModalBottomSheet<void>(
+    await showDialog<void>(
       context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
       builder: (context) {
         final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
-        return Padding(
-          padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      s.addProfile,
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
+        return AnimatedPadding(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          padding: EdgeInsets.fromLTRB(18, 24, 18, 24 + bottomInset),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 520),
+              child: Material(
+                color: _surface,
+                elevation: 18,
+                shadowColor: Colors.black54,
+                borderRadius: BorderRadius.circular(8),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              s.addProfile,
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: s.close,
+                            onPressed: () => Navigator.of(context).pop(),
+                            icon: const Icon(Icons.close),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: _manualController,
+                        minLines: 3,
+                        maxLines: 6,
+                        decoration: InputDecoration(hintText: s.importHint),
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 10,
+                        children: [
+                          FilledButton.icon(
+                            onPressed: _busy
+                                ? null
+                                : () {
+                                    Navigator.of(context).pop();
+                                    unawaited(_importManual());
+                                  },
+                            icon: const Icon(Icons.add_link),
+                            label: Text(s.importAction),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: _busy
+                                ? null
+                                : () {
+                                    Navigator.of(context).pop();
+                                    unawaited(_importFromClipboard());
+                                  },
+                            icon: const Icon(Icons.content_paste),
+                            label: Text(s.clipboard),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: _busy
+                                ? null
+                                : () {
+                                    Navigator.of(context).pop();
+                                    unawaited(_importFromQr());
+                                  },
+                            icon: const Icon(Icons.qr_code_scanner),
+                            label: const Text('QR'),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                  IconButton(
-                    tooltip: s.close,
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close),
-                  ),
-                ],
+                ),
               ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _manualController,
-                minLines: 3,
-                maxLines: 6,
-                decoration: InputDecoration(hintText: s.importHint),
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: [
-                  FilledButton.icon(
-                    onPressed: _busy
-                        ? null
-                        : () {
-                            Navigator.of(context).pop();
-                            unawaited(_importManual());
-                          },
-                    icon: const Icon(Icons.add_link),
-                    label: Text(s.importAction),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: _busy
-                        ? null
-                        : () {
-                            Navigator.of(context).pop();
-                            unawaited(_importFromClipboard());
-                          },
-                    icon: const Icon(Icons.content_paste),
-                    label: Text(s.clipboard),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: _busy
-                        ? null
-                        : () {
-                            Navigator.of(context).pop();
-                            unawaited(_importFromQr());
-                          },
-                    icon: const Icon(Icons.qr_code_scanner),
-                    label: const Text('QR'),
-                  ),
-                ],
-              ),
-            ],
+            ),
           ),
         );
       },
@@ -460,12 +469,17 @@ class _HomeScreenState extends State<HomeScreen> {
             AurumVpnStatus.started,
           }, timeout: const Duration(seconds: 14));
           if (finalStatus == AurumVpnStatus.started) {
-            if (profile.kind != VpnProfileKind.naive ||
-                await _probeLocalMixedProxy()) {
+            if (profile.kind != VpnProfileKind.naive) {
               connected = true;
               break;
             }
-            lastStartError = s.connectionProbeFailed;
+
+            if (await _probeLocalMixedProxy()) {
+              connected = true;
+              break;
+            } else {
+              lastStartError = s.connectionProbeFailed;
+            }
           } else {
             lastStartError = s.vpnNotConnected(finalStatus);
           }
@@ -520,16 +534,16 @@ class _HomeScreenState extends State<HomeScreen> {
       final status = await _refreshVpnStatus();
       if (status != AurumVpnStatus.stopped) {
         await _vpnEngine.stopVPN().timeout(
-          const Duration(seconds: 7),
+          const Duration(seconds: 5),
           onTimeout: () => true,
         );
         final stoppedStatus = await _waitForVpnStatus({
           AurumVpnStatus.stopped,
-        }, timeout: const Duration(seconds: 14));
+        }, timeout: const Duration(seconds: 7));
         if (stoppedStatus != AurumVpnStatus.stopped) {
           _queueLog('VPN stop cleanup is still finishing: $stoppedStatus');
         }
-        await Future<void>.delayed(const Duration(milliseconds: 1200));
+        await Future<void>.delayed(const Duration(milliseconds: 700));
       }
 
       if (mounted) {
@@ -613,8 +627,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     return const [
-      _ConnectionConfigPlan(NaiveOutboundMode.native, 'native-naive'),
       _ConnectionConfigPlan(NaiveOutboundMode.httpConnect, 'https-connect'),
+      _ConnectionConfigPlan(NaiveOutboundMode.native, 'native-naive'),
     ];
   }
 
@@ -707,6 +721,8 @@ class _HomeScreenState extends State<HomeScreen> {
       VpnProfileKind.vlessReality => 'VLESS Reality',
       VpnProfileKind.vlessTls => 'VLESS TLS',
       VpnProfileKind.naive => 'NaiveProxy',
+      VpnProfileKind.hysteria2 => 'Hysteria2',
+      VpnProfileKind.hysteria => 'Hysteria',
       VpnProfileKind.singBoxConfig => 'Sing-box',
     };
   }
@@ -824,7 +840,85 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _checkAndInstallUpdate() async {
+    if (_updateBusy) {
+      return;
+    }
+
+    setState(() {
+      _updateBusy = true;
+      _updateProgress = null;
+      _updateMessage = s.updateChecking;
+    });
+
+    try {
+      final abis = await _updateService.supportedAbis();
+      final update = await _updateService.findLatest(
+        currentVersion: _appVersion,
+        supportedAbis: abis,
+      );
+      if (update == null) {
+        if (mounted) {
+          setState(() => _updateMessage = s.updateNoUpdates(_appVersion));
+        }
+        return;
+      }
+
+      if (mounted) {
+        setState(() => _updateMessage = s.updateDownloading(update.version));
+      }
+
+      final file = await _updateService.download(
+        update,
+        onProgress: (progress) {
+          if (!mounted) {
+            return;
+          }
+          setState(() {
+            _updateProgress = progress;
+            _updateMessage = progress == null
+                ? s.updateDownloading(update.version)
+                : s.updateDownloadingProgress(
+                    update.version,
+                    (progress * 100).round().clamp(0, 100),
+                  );
+          });
+        },
+      );
+
+      if (mounted) {
+        setState(() => _updateMessage = s.updateInstalling(update.version));
+      }
+      await _updateService.installApk(file);
+      if (mounted) {
+        setState(() => _updateMessage = s.updateInstallerOpened);
+      }
+    } on AppUpdatePermissionException {
+      if (mounted) {
+        setState(() => _updateMessage = s.updateInstallPermission);
+        _showSnack(
+          s.updateInstallPermission,
+          action: SnackBarAction(
+            label: s.openSettings,
+            onPressed: () => unawaited(_updateService.openInstallSettings()),
+          ),
+        );
+      }
+    } on Object catch (error) {
+      if (mounted) {
+        setState(
+          () => _updateMessage = s.updateFailed(_redactSensitive('$error')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _updateBusy = false);
+      }
+    }
+  }
+
   Future<void> _emailDeveloper() async {
+    await _loadBufferedLogs();
     final report = _buildDiagnosticReport();
     final uri = Uri.parse(
       'mailto:$_supportEmail?subject=${Uri.encodeComponent(s.mailSubject)}&body=${Uri.encodeComponent(report)}',
@@ -926,7 +1020,12 @@ class _HomeScreenState extends State<HomeScreen> {
         if (proxy['type'] == 'naive') 'mode=naive-native',
         if (proxy['type'] == 'http' || proxy['type'] == 'naive')
           'health_probe=mixed-proxy',
-        if (proxy['type'] != 'http') 'quic=${proxy['quic'] ?? 'auto'}',
+        if (proxy['type'] == 'naive')
+          'transport=${proxy['quic'] == true ? 'h3/quic' : 'h2'}',
+        if (proxy['type'] == 'vless')
+          'packet=${proxy['packet_encoding'] ?? 'default'}',
+        if (proxy['type'] == 'hysteria2' || proxy['type'] == 'hysteria')
+          'transport=udp',
         'mixed_proxy=$hasMixedProxy',
       ].join('; ');
     } on Object {
@@ -940,6 +1039,69 @@ class _HomeScreenState extends State<HomeScreen> {
         log.contains('router: failed to search process: process not found');
   }
 
+  Future<void> _setLogsExpanded(bool expanded) async {
+    if (_logsExpanded == expanded) {
+      return;
+    }
+    _logsExpanded = expanded;
+
+    if (!expanded) {
+      await _logSubscription?.cancel();
+      _logSubscription = null;
+      _pendingLogs.clear();
+      _logFlushTimer?.cancel();
+      _logFlushTimer = null;
+      return;
+    }
+
+    _startLogStreaming();
+    await _loadBufferedLogs();
+  }
+
+  void _startLogStreaming() {
+    if (_logSubscription != null) {
+      return;
+    }
+
+    _logSubscription = _vpnEngine.onLogMessage.listen((event) {
+      if (!mounted || !_logsExpanded || event['type'] != 'log') {
+        return;
+      }
+      final message = event['message'] as String?;
+      if (message == null || message.isEmpty) {
+        return;
+      }
+      _queueLog(message);
+    });
+  }
+
+  Future<void> _loadBufferedLogs() async {
+    try {
+      final bufferedLogs = await _vpnEngine.getLogs().timeout(
+        const Duration(seconds: 2),
+        onTimeout: () => const <String>[],
+      );
+      final cleaned = bufferedLogs
+          .map(_cleanLog)
+          .where((log) => log.isNotEmpty)
+          .toList()
+          .reversed
+          .take(60)
+          .toList()
+          .reversed
+          .toList();
+      if (mounted && cleaned.isNotEmpty) {
+        setState(() {
+          _logs
+            ..clear()
+            ..addAll(cleaned);
+        });
+      }
+    } on Object {
+      // Logs are optional and should never slow down VPN startup.
+    }
+  }
+
   String _redactSensitive(String value) {
     return value
         .replaceAllMapped(
@@ -951,12 +1113,19 @@ class _HomeScreenState extends State<HomeScreen> {
           (match) => '${match[1]}***@',
         )
         .replaceAllMapped(
+          RegExp(
+            r'((?:hy2|hysteria2|hysteria)://)[^@\s]+@',
+            caseSensitive: false,
+          ),
+          (match) => '${match[1]}***@',
+        )
+        .replaceAllMapped(
           RegExp(r'(https?://)[^:@/\s]+:[^@/\s]+@', caseSensitive: false),
           (match) => '${match[1]}***:***@',
         )
         .replaceAllMapped(
           RegExp(
-            r'("(?:password|uuid|public_key|short_id)"\s*:\s*")[^"]+',
+            r'("(?:password|uuid|public_key|short_id|auth|auth_str)"\s*:\s*")[^"]+',
             caseSensitive: false,
           ),
           (match) => '${match[1]}***',
@@ -1023,6 +1192,16 @@ class _HomeScreenState extends State<HomeScreen> {
               downlink: _downlink,
               sessionTotal: _sessionTotal,
             ),
+            const SizedBox(height: 14),
+            FilledButton.icon(
+              onPressed: _busy || selected == null ? null : _toggleVpn,
+              icon: Icon(_connected ? Icons.power_settings_new : Icons.shield),
+              label: Text(_connected ? s.disconnect : s.connect),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(54),
+                textStyle: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
             const SizedBox(height: 16),
             _ProfilePanel(
               strings: s,
@@ -1035,16 +1214,6 @@ class _HomeScreenState extends State<HomeScreen> {
               onQr: selected == null ? null : _showQr,
               onDelete: selected == null ? null : _deleteSelected,
               kindLabel: _profileKindLabel,
-            ),
-            const SizedBox(height: 18),
-            FilledButton.icon(
-              onPressed: _busy || selected == null ? null : _toggleVpn,
-              icon: Icon(_connected ? Icons.power_settings_new : Icons.shield),
-              label: Text(_connected ? s.disconnect : s.connect),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(54),
-                textStyle: Theme.of(context).textTheme.titleMedium,
-              ),
             ),
             const SizedBox(height: 16),
             _SupportPanel(
@@ -1059,9 +1228,23 @@ class _HomeScreenState extends State<HomeScreen> {
               onDeveloper: _emailDeveloper,
             ),
             const SizedBox(height: 16),
+            _UpdatePanel(
+              strings: s,
+              currentVersion: _appVersion,
+              message: _updateMessage,
+              busy: _updateBusy,
+              progress: _updateProgress,
+              onCheck: _checkAndInstallUpdate,
+            ),
+            const SizedBox(height: 16),
             _FaqPanel(strings: s),
             const SizedBox(height: 16),
-            _LogsPanel(strings: s, logs: _logs),
+            _LogsPanel(
+              strings: s,
+              logs: _logs,
+              onExpansionChanged: (expanded) =>
+                  unawaited(_setLogsExpanded(expanded)),
+            ),
           ],
         ),
       ),
@@ -1315,10 +1498,12 @@ class _ProfileTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(
-              profile.kind == VpnProfileKind.naive ? Icons.public : Icons.bolt,
-              color: selected ? _goldSoft : _mutedGold,
-            ),
+            Icon(switch (profile.kind) {
+              VpnProfileKind.naive => Icons.public,
+              VpnProfileKind.hysteria2 ||
+              VpnProfileKind.hysteria => Icons.speed_outlined,
+              _ => Icons.bolt,
+            }, color: selected ? _goldSoft : _mutedGold),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -1428,6 +1613,12 @@ class _ProfileInsightPanel extends StatelessWidget {
                       _Metric(
                         label: strings.dnsLabel,
                         value: strings.dnsCountryValue,
+                      ),
+                      _Metric(
+                        label: strings.subscriptionLabel,
+                        value: strings.subscriptionStatus(
+                          profile!.subscriptionExpiresAt,
+                        ),
                       ),
                     ],
                   ),
@@ -1539,6 +1730,76 @@ class _SupportPanel extends StatelessWidget {
   }
 }
 
+class _UpdatePanel extends StatelessWidget {
+  const _UpdatePanel({
+    required this.strings,
+    required this.currentVersion,
+    required this.message,
+    required this.busy,
+    required this.progress,
+    required this.onCheck,
+  });
+
+  final _Strings strings;
+  final String currentVersion;
+  final String? message;
+  final bool busy;
+  final double? progress;
+  final VoidCallback onCheck;
+
+  @override
+  Widget build(BuildContext context) {
+    return ExpansionTile(
+      tilePadding: EdgeInsets.zero,
+      leading: const Icon(Icons.system_update_alt, color: _goldSoft),
+      title: Text(strings.updates),
+      subtitle: Text(
+        message ?? strings.updateIdle(currentVersion),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(color: _mutedGold),
+      ),
+      children: [
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: _surface,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: _gold.withValues(alpha: 0.18)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  strings.updateDescription,
+                  style: const TextStyle(color: _mutedGold, height: 1.35),
+                ),
+                if (busy) ...[
+                  const SizedBox(height: 12),
+                  LinearProgressIndicator(value: progress),
+                ],
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: busy ? null : onCheck,
+                  icon: busy
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.download_for_offline_outlined),
+                  label: Text(strings.checkUpdates),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _FaqPanel extends StatelessWidget {
   const _FaqPanel({required this.strings});
 
@@ -1585,14 +1846,20 @@ class _FaqPanel extends StatelessWidget {
 }
 
 class _LogsPanel extends StatelessWidget {
-  const _LogsPanel({required this.strings, required this.logs});
+  const _LogsPanel({
+    required this.strings,
+    required this.logs,
+    required this.onExpansionChanged,
+  });
 
   final _Strings strings;
   final List<String> logs;
+  final ValueChanged<bool> onExpansionChanged;
 
   @override
   Widget build(BuildContext context) {
     return ExpansionTile(
+      onExpansionChanged: onExpansionChanged,
       tilePadding: EdgeInsets.zero,
       title: Text(strings.logs),
       children: [
@@ -1671,6 +1938,9 @@ class _Strings {
     required this.networkLabel,
     required this.dnsLabel,
     required this.dnsCountryValue,
+    required this.subscriptionLabel,
+    required this.subscriptionUnknown,
+    required this.subscriptionExpired,
     required this.mobileReady,
     required this.mobileNetworkAdvice,
     required this.endpointLabel,
@@ -1680,6 +1950,13 @@ class _Strings {
     required this.support,
     required this.donate,
     required this.developer,
+    required this.updates,
+    required this.updateDescription,
+    required this.checkUpdates,
+    required this.updateChecking,
+    required this.updateInstallerOpened,
+    required this.updateInstallPermission,
+    required this.openSettings,
     required this.faq,
     required this.faqItems,
     required this.logs,
@@ -1730,6 +2007,9 @@ class _Strings {
   final String networkLabel;
   final String dnsLabel;
   final String dnsCountryValue;
+  final String subscriptionLabel;
+  final String subscriptionUnknown;
+  final String subscriptionExpired;
   final String mobileReady;
   final String mobileNetworkAdvice;
   final String endpointLabel;
@@ -1739,6 +2019,13 @@ class _Strings {
   final String support;
   final String donate;
   final String developer;
+  final String updates;
+  final String updateDescription;
+  final String checkUpdates;
+  final String updateChecking;
+  final String updateInstallerOpened;
+  final String updateInstallPermission;
+  final String openSettings;
   final String faq;
   final List<_FaqItem> faqItems;
   final String logs;
@@ -1797,6 +2084,62 @@ class _Strings {
     _ => 'VPN не успел полностью остановиться. Последний статус: $status.',
   };
 
+  String updateIdle(String version) => switch (this) {
+    _Strings.en => 'Installed version: $version',
+    _ => 'Установлена версия: $version',
+  };
+
+  String updateNoUpdates(String version) => switch (this) {
+    _Strings.en => 'Version $version is current.',
+    _ => 'Версия $version актуальна.',
+  };
+
+  String updateDownloading(String version) => switch (this) {
+    _Strings.en => 'Downloading version $version...',
+    _ => 'Скачиваю версию $version...',
+  };
+
+  String updateDownloadingProgress(String version, int percent) =>
+      switch (this) {
+        _Strings.en => 'Downloading version $version: $percent%',
+        _ => 'Скачиваю версию $version: $percent%',
+      };
+
+  String updateInstalling(String version) => switch (this) {
+    _Strings.en => 'Version $version downloaded. Opening installer...',
+    _ => 'Версия $version скачана. Открываю установщик...',
+  };
+
+  String updateFailed(String error) => switch (this) {
+    _Strings.en => 'Update failed: $error',
+    _ => 'Обновление не удалось: $error',
+  };
+
+  String subscriptionStatus(DateTime? expiresAt) {
+    if (expiresAt == null) {
+      return subscriptionUnknown;
+    }
+
+    final remaining = expiresAt.toUtc().difference(DateTime.now().toUtc());
+    if (remaining.isNegative) {
+      return subscriptionExpired;
+    }
+
+    if (remaining.inHours < 24) {
+      final hours = remaining.inHours.clamp(1, 23);
+      return switch (this) {
+        _Strings.en => '$hours h left',
+        _ => 'Осталось $hours ч',
+      };
+    }
+
+    final days = remaining.inDays + (remaining.inHours % 24 == 0 ? 0 : 1);
+    return switch (this) {
+      _Strings.en => '$days d left',
+      _ => 'Осталось $days дн.',
+    };
+  }
+
   static const ru = _Strings._(
     addProfileHint: 'Добавь подписку Remnawave, QR или отдельный ключ',
     nothingToImport: 'Нечего импортировать.',
@@ -1821,7 +2164,8 @@ class _Strings {
     openLogsMessage: 'VPN остановлен. Открой логи sing-box.',
     languageChanged: 'Язык переключён',
     addProfile: 'Добавить профиль',
-    importHint: 'https://sub... или vless://... или naive+https://...',
+    importHint:
+        'https://sub... или vless://... или naive+https://... или hy2://...',
     importAction: 'Импорт',
     clipboard: 'Буфер',
     scanQr: 'Сканировать QR',
@@ -1844,6 +2188,9 @@ class _Strings {
     networkLabel: 'Сеть',
     dnsLabel: 'DNS',
     dnsCountryValue: 'Защищённый DNS',
+    subscriptionLabel: 'Подписка',
+    subscriptionUnknown: 'Срок не указан',
+    subscriptionExpired: 'Истекла',
     mobileReady: 'Wi‑Fi / LTE',
     mobileNetworkAdvice:
         'Подключение настроено для стабильной работы в Wi‑Fi и мобильных сетях. DNS-запросы идут через туннель, а при смене профиля приложение полностью пересобирает конфиг.',
@@ -1854,6 +2201,15 @@ class _Strings {
     support: 'Поддержка',
     donate: 'Донат',
     developer: 'Разработчику',
+    updates: 'Обновления',
+    updateDescription:
+        'Приложение само проверит свежий APK, выберет файл под телефон и откроет установщик Android. Переходить на страницу релиза не нужно.',
+    checkUpdates: 'Проверить и установить',
+    updateChecking: 'Проверяю обновления...',
+    updateInstallerOpened: 'Установщик Android открыт',
+    updateInstallPermission:
+        'Разреши установку приложений из Aurum VPN и нажми кнопку ещё раз.',
+    openSettings: 'Настройки',
     faq: 'FAQ',
     faqItems: [
       _FaqItem(
@@ -1864,7 +2220,7 @@ class _Strings {
       _FaqItem(
         question: 'Какие протоколы поддерживаются?',
         answer:
-            'Поддерживаются VLESS Reality, VLESS TLS, Remnawave подписки, naive+https и sing-box JSON.',
+            'Поддерживаются VLESS Reality, VLESS TLS, NaiveProxy, Hysteria2, Hysteria, Remnawave подписки и sing-box JSON.',
       ),
       _FaqItem(
         question: 'Что делать, если после смены профиля пропал интернет?',
@@ -1916,7 +2272,8 @@ class _Strings {
     openLogsMessage: 'VPN stopped. Open sing-box logs.',
     languageChanged: 'Language changed',
     addProfile: 'Add profile',
-    importHint: 'https://sub... or vless://... or naive+https://...',
+    importHint:
+        'https://sub... or vless://... or naive+https://... or hy2://...',
     importAction: 'Import',
     clipboard: 'Clipboard',
     scanQr: 'Scan QR',
@@ -1938,6 +2295,9 @@ class _Strings {
     networkLabel: 'Network',
     dnsLabel: 'DNS',
     dnsCountryValue: 'Protected DNS',
+    subscriptionLabel: 'Subscription',
+    subscriptionUnknown: 'Not provided',
+    subscriptionExpired: 'Expired',
     mobileReady: 'Wi‑Fi / LTE',
     mobileNetworkAdvice:
         'The connection is tuned for stable Wi‑Fi and mobile networks. DNS requests stay inside the tunnel, and the app rebuilds the config when switching profiles.',
@@ -1948,6 +2308,15 @@ class _Strings {
     support: 'Support',
     donate: 'Donate',
     developer: 'Developer',
+    updates: 'Updates',
+    updateDescription:
+        'The app checks for a fresh APK, picks the right file for this phone, and opens the Android installer. No release page is opened.',
+    checkUpdates: 'Check and install',
+    updateChecking: 'Checking updates...',
+    updateInstallerOpened: 'Android installer opened',
+    updateInstallPermission:
+        'Allow app installs from Aurum VPN, then press the button again.',
+    openSettings: 'Settings',
     faq: 'FAQ',
     faqItems: [
       _FaqItem(
@@ -1958,7 +2327,7 @@ class _Strings {
       _FaqItem(
         question: 'Which protocols are supported?',
         answer:
-            'VLESS Reality, VLESS TLS, Remnawave subscriptions, naive+https, and sing-box JSON are supported.',
+            'VLESS Reality, VLESS TLS, NaiveProxy, Hysteria2, Hysteria, Remnawave subscriptions, and sing-box JSON are supported.',
       ),
       _FaqItem(
         question: 'What if internet stops after switching profiles?',
