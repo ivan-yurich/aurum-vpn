@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.22 - 2026-05-26
+
+- Moved the main connect/disconnect button directly under the connection status
+  card, above the profiles block, so the primary VPN action stays visible
+  sooner on mobile screens.
+
 ## 1.0.21 - 2026-05-26
 
 - Changed generated NaiveProxy startup order to prefer HTTPS CONNECT fallback

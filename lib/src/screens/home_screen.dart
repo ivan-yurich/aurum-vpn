@@ -26,7 +26,7 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.21';
+const _appVersion = '1.0.22';
 
 class _ConnectionConfigPlan {
   const _ConnectionConfigPlan(this.naiveMode, this.label);
@@ -1192,6 +1192,16 @@ class _HomeScreenState extends State<HomeScreen> {
               downlink: _downlink,
               sessionTotal: _sessionTotal,
             ),
+            const SizedBox(height: 14),
+            FilledButton.icon(
+              onPressed: _busy || selected == null ? null : _toggleVpn,
+              icon: Icon(_connected ? Icons.power_settings_new : Icons.shield),
+              label: Text(_connected ? s.disconnect : s.connect),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(54),
+                textStyle: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
             const SizedBox(height: 16),
             _ProfilePanel(
               strings: s,
@@ -1204,16 +1214,6 @@ class _HomeScreenState extends State<HomeScreen> {
               onQr: selected == null ? null : _showQr,
               onDelete: selected == null ? null : _deleteSelected,
               kindLabel: _profileKindLabel,
-            ),
-            const SizedBox(height: 18),
-            FilledButton.icon(
-              onPressed: _busy || selected == null ? null : _toggleVpn,
-              icon: Icon(_connected ? Icons.power_settings_new : Icons.shield),
-              label: Text(_connected ? s.disconnect : s.connect),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(54),
-                textStyle: Theme.of(context).textTheme.titleMedium,
-              ),
             ),
             const SizedBox(height: 16),
             _SupportPanel(
