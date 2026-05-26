@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import '../models/vpn_profile.dart';
 
@@ -35,7 +36,7 @@ class SingBoxConfigBuilder {
 
     final config = <String, dynamic>{
       'log': {'level': 'warn', 'timestamp': true},
-      'dns': _dnsConfig(),
+      'dns': _dnsConfig(profile),
       'inbounds': [_tunInbound(), _mixedInbound()],
       'outbounds': [
         proxyOutbound,
@@ -70,11 +71,10 @@ class SingBoxConfigBuilder {
       'type': 'tun',
       'tag': 'tun-in',
       'address': ['172.19.0.1/30'],
-      'mtu': 1380,
+      'mtu': 9000,
       'auto_route': true,
       'strict_route': true,
       'stack': 'gvisor',
-      'endpoint_independent_nat': false,
     };
     inbound['interface_name'] = 'tun0';
     inbound['exclude_package'] = ['online.dnsai.ivanvpn'];
@@ -90,7 +90,7 @@ class SingBoxConfigBuilder {
     };
   }
 
-  Map<String, dynamic> _dnsConfig() {
+  Map<String, dynamic> _dnsConfig(VpnProfile profile) {
     final servers = <Map<String, dynamic>>[
       {'type': 'local', 'tag': 'local-dns'},
       {
@@ -110,21 +110,33 @@ class SingBoxConfigBuilder {
       },
     ];
 
+    final rules = <Map<String, dynamic>>[];
+    final server = profile.server?.trim();
+    if (server != null && server.isNotEmpty && !_isIpLiteral(server)) {
+      rules.add({
+        'domain': [server],
+        'action': 'route',
+        'server': 'local-dns',
+      });
+    }
+    rules.add({
+      'inbound': ['tun-in'],
+      'query_type': ['A', 'AAAA'],
+      'action': 'route',
+      'server': 'fakeip',
+    });
+
     return {
       'servers': servers,
-      'rules': [
-        {
-          'query_type': ['A', 'AAAA'],
-          'action': 'route',
-          'server': 'fakeip',
-        },
-      ],
+      'rules': rules,
       'strategy': 'ipv4_only',
       'cache_capacity': 8192,
       'reverse_mapping': true,
       'final': 'global-dns',
     };
   }
+
+  bool _isIpLiteral(String value) => InternetAddress.tryParse(value) != null;
 
   Map<String, dynamic> _unsupportedUdpRule(bool rejectAllUdp) {
     return {
@@ -146,6 +158,7 @@ class SingBoxConfigBuilder {
     proxyOutbound.putIfAbsent('tcp_keep_alive', () => '3m');
     proxyOutbound.putIfAbsent('tcp_keep_alive_interval', () => '30s');
     proxyOutbound.putIfAbsent('domain_resolver', () => 'local-dns');
+    proxyOutbound.putIfAbsent('domain_strategy', () => 'ipv4_only');
     proxyOutbound.putIfAbsent('network_strategy', () => 'fallback');
     proxyOutbound.putIfAbsent('fallback_delay', () => '300ms');
   }
@@ -160,6 +173,7 @@ class SingBoxConfigBuilder {
       if (proxyOutbound['network'] == 'tcp') {
         proxyOutbound.remove('network');
       }
+      proxyOutbound.putIfAbsent('packet_encoding', () => 'xudp');
       return;
     }
 
@@ -175,6 +189,11 @@ class SingBoxConfigBuilder {
 
     if (!useHttpConnect) {
       proxyOutbound['type'] = 'naive';
+      if (naiveMode == NaiveOutboundMode.native ||
+          naiveMode == NaiveOutboundMode.auto) {
+        proxyOutbound['quic'] = false;
+        proxyOutbound.remove('quic_congestion_control');
+      }
     } else {
       proxyOutbound['type'] = 'http';
       proxyOutbound.remove('extra_headers');

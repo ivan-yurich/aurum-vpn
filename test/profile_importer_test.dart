@@ -16,7 +16,47 @@ void main() {
     expect(profiles.first.kind, VpnProfileKind.vlessReality);
     expect(profiles.first.outbound?['type'], 'vless');
     expect(profiles.first.outbound?['network'], isNull);
+    expect(profiles.first.outbound?['packet_encoding'], 'xudp');
     expect(profiles.first.outbound?['tls']['reality']['public_key'], 'abc123');
+  });
+
+  test('imports Hysteria2 link', () async {
+    const link =
+        'hy2://secret-for-test@example.com:443?sni=cdn.example.com&obfs=salamander&obfs-password=obfs-secret&upmbps=100&downmbps=200#Hy2';
+
+    final profile = (await ProfileImporter().importFromText(link)).first;
+    final config =
+        jsonDecode(SingBoxConfigBuilder().build(profile))
+            as Map<String, dynamic>;
+    final proxy = (config['outbounds'] as List).first as Map<String, dynamic>;
+
+    expect(profile.kind, VpnProfileKind.hysteria2);
+    expect(proxy['type'], 'hysteria2');
+    expect(proxy['server'], 'example.com');
+    expect(proxy['password'], 'secret-for-test');
+    expect(proxy['up_mbps'], 100);
+    expect(proxy['down_mbps'], 200);
+    expect(proxy['obfs'], {'type': 'salamander', 'password': 'obfs-secret'});
+    expect(proxy['tls'], {'enabled': true, 'server_name': 'cdn.example.com'});
+  });
+
+  test('imports Hysteria v1 link with safe defaults', () async {
+    const link =
+        'hysteria://example.com:443?auth=secret-for-test&peer=cdn.example.com&upmbps=80&downmbps=160#Hy1';
+
+    final profile = (await ProfileImporter().importFromText(link)).first;
+    final config =
+        jsonDecode(SingBoxConfigBuilder().build(profile))
+            as Map<String, dynamic>;
+    final proxy = (config['outbounds'] as List).first as Map<String, dynamic>;
+
+    expect(profile.kind, VpnProfileKind.hysteria);
+    expect(proxy['type'], 'hysteria');
+    expect(proxy['server'], 'example.com');
+    expect(proxy['auth_str'], 'secret-for-test');
+    expect(proxy['up_mbps'], 80);
+    expect(proxy['down_mbps'], 160);
+    expect(proxy['tls'], {'enabled': true, 'server_name': 'cdn.example.com'});
   });
 
   test('imports NaiveProxy link', () async {
@@ -54,6 +94,12 @@ void main() {
     });
     expect((config['dns'] as Map<String, dynamic>)['rules'], [
       {
+        'domain': ['example.com'],
+        'action': 'route',
+        'server': 'local-dns',
+      },
+      {
+        'inbound': ['tun-in'],
         'query_type': ['A', 'AAAA'],
         'action': 'route',
         'server': 'fakeip',
@@ -68,11 +114,11 @@ void main() {
       (inbound) => inbound['type'] == 'tun',
     );
     expect(tunInbound['address'], ['172.19.0.1/30']);
-    expect(tunInbound['mtu'], 1380);
+    expect(tunInbound['mtu'], 9000);
     expect(tunInbound['interface_name'], 'tun0');
     expect(tunInbound['strict_route'], isTrue);
     expect(tunInbound['stack'], 'gvisor');
-    expect(tunInbound['endpoint_independent_nat'], isFalse);
+    expect(tunInbound['endpoint_independent_nat'], isNull);
     expect(tunInbound['exclude_package'], ['online.dnsai.ivanvpn']);
     expect(
       inbounds.any(
@@ -89,16 +135,11 @@ void main() {
       ),
       isNot(contains('dns')),
     );
-    expect(
-      ((config['route'] as Map<String, dynamic>)['rules'] as List)
-          .whereType<Map<String, dynamic>>()
-          .first,
-      {'action': 'sniff'},
-    );
     final routeRules =
         ((config['route'] as Map<String, dynamic>)['rules'] as List)
             .whereType<Map<String, dynamic>>()
             .toList();
+    expect(routeRules.first['action'], 'sniff');
     expect(
       routeRules.any(
         (rule) =>
@@ -151,12 +192,14 @@ void main() {
     expect((config['dns'] as Map<String, dynamic>)['reverse_mapping'], isTrue);
     expect((config['dns'] as Map<String, dynamic>)['strategy'], 'ipv4_only');
     expect(proxy['connect_timeout'], '8s');
+    expect(proxy['tcp_fast_open'], isNull);
     expect(proxy['tcp_keep_alive'], '3m');
     expect(proxy['tcp_keep_alive_interval'], '30s');
     expect(proxy['domain_resolver'], 'local-dns');
+    expect(proxy['domain_strategy'], 'ipv4_only');
     expect(proxy['network_strategy'], 'fallback');
     expect(proxy['fallback_delay'], '300ms');
-    expect(proxy['quic'], isNull);
+    expect(proxy['quic'], isFalse);
     expect(proxy['quic_congestion_control'], isNull);
     expect(proxy['udp_over_tcp'], isNull);
 
@@ -295,6 +338,28 @@ void main() {
     expect(proxy['tls'], {'server_name': 'n8n-cloud.online', 'enabled': true});
   });
 
+  test('imports standalone sing-box Hysteria2 outbound', () async {
+    final payload = jsonEncode({
+      'type': 'hysteria2',
+      'tag': 'proxy',
+      'server': 'example.com',
+      'server_port': 443,
+      'password': 'secret-for-test',
+      'tls': {'enabled': true, 'server_name': 'example.com'},
+    });
+
+    final profile = (await ProfileImporter().importFromText(payload)).first;
+    final config =
+        jsonDecode(SingBoxConfigBuilder().build(profile))
+            as Map<String, dynamic>;
+    final proxy = (config['outbounds'] as List).first as Map<String, dynamic>;
+
+    expect(profile.kind, VpnProfileKind.hysteria2);
+    expect(proxy['type'], 'hysteria2');
+    expect(proxy['server'], 'example.com');
+    expect(proxy['password'], 'secret-for-test');
+  });
+
   test('normalizes legacy VLESS tcp-only outbounds from saved profiles', () {
     const profile = VpnProfile(
       id: 'legacy-vless',
@@ -318,6 +383,7 @@ void main() {
     final proxy = (config['outbounds'] as List).first as Map<String, dynamic>;
 
     expect(proxy['network'], isNull);
+    expect(proxy['packet_encoding'], 'xudp');
     final routeRules =
         ((config['route'] as Map<String, dynamic>)['rules'] as List)
             .whereType<Map<String, dynamic>>()
