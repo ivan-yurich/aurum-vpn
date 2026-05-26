@@ -26,7 +26,7 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.23';
+const _appVersion = '1.0.24';
 
 class _ConnectionConfigPlan {
   const _ConnectionConfigPlan(this.naiveMode, this.label);
@@ -1614,6 +1614,12 @@ class _ProfileInsightPanel extends StatelessWidget {
                         label: strings.dnsLabel,
                         value: strings.dnsCountryValue,
                       ),
+                      _Metric(
+                        label: strings.subscriptionLabel,
+                        value: strings.subscriptionStatus(
+                          profile!.subscriptionExpiresAt,
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -1932,6 +1938,9 @@ class _Strings {
     required this.networkLabel,
     required this.dnsLabel,
     required this.dnsCountryValue,
+    required this.subscriptionLabel,
+    required this.subscriptionUnknown,
+    required this.subscriptionExpired,
     required this.mobileReady,
     required this.mobileNetworkAdvice,
     required this.endpointLabel,
@@ -1998,6 +2007,9 @@ class _Strings {
   final String networkLabel;
   final String dnsLabel;
   final String dnsCountryValue;
+  final String subscriptionLabel;
+  final String subscriptionUnknown;
+  final String subscriptionExpired;
   final String mobileReady;
   final String mobileNetworkAdvice;
   final String endpointLabel;
@@ -2103,6 +2115,31 @@ class _Strings {
     _ => 'Обновление не удалось: $error',
   };
 
+  String subscriptionStatus(DateTime? expiresAt) {
+    if (expiresAt == null) {
+      return subscriptionUnknown;
+    }
+
+    final remaining = expiresAt.toUtc().difference(DateTime.now().toUtc());
+    if (remaining.isNegative) {
+      return subscriptionExpired;
+    }
+
+    if (remaining.inHours < 24) {
+      final hours = remaining.inHours.clamp(1, 23);
+      return switch (this) {
+        _Strings.en => '$hours h left',
+        _ => 'Осталось $hours ч',
+      };
+    }
+
+    final days = remaining.inDays + (remaining.inHours % 24 == 0 ? 0 : 1);
+    return switch (this) {
+      _Strings.en => '$days d left',
+      _ => 'Осталось $days дн.',
+    };
+  }
+
   static const ru = _Strings._(
     addProfileHint: 'Добавь подписку Remnawave, QR или отдельный ключ',
     nothingToImport: 'Нечего импортировать.',
@@ -2151,6 +2188,9 @@ class _Strings {
     networkLabel: 'Сеть',
     dnsLabel: 'DNS',
     dnsCountryValue: 'Защищённый DNS',
+    subscriptionLabel: 'Подписка',
+    subscriptionUnknown: 'Срок не указан',
+    subscriptionExpired: 'Истекла',
     mobileReady: 'Wi‑Fi / LTE',
     mobileNetworkAdvice:
         'Подключение настроено для стабильной работы в Wi‑Fi и мобильных сетях. DNS-запросы идут через туннель, а при смене профиля приложение полностью пересобирает конфиг.',
@@ -2255,6 +2295,9 @@ class _Strings {
     networkLabel: 'Network',
     dnsLabel: 'DNS',
     dnsCountryValue: 'Protected DNS',
+    subscriptionLabel: 'Subscription',
+    subscriptionUnknown: 'Not provided',
+    subscriptionExpired: 'Expired',
     mobileReady: 'Wi‑Fi / LTE',
     mobileNetworkAdvice:
         'The connection is tuned for stable Wi‑Fi and mobile networks. DNS requests stay inside the tunnel, and the app rebuilds the config when switching profiles.',

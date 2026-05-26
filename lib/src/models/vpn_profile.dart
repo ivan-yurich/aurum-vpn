@@ -28,6 +28,7 @@ class VpnProfile {
     this.port,
     this.outbound,
     this.rawConfig,
+    this.subscriptionExpiresAt,
   });
 
   final String id;
@@ -38,6 +39,7 @@ class VpnProfile {
   final int? port;
   final Map<String, dynamic>? outbound;
   final String? rawConfig;
+  final DateTime? subscriptionExpiresAt;
 
   String get endpoint {
     if (server == null || server!.isEmpty) {
@@ -56,6 +58,7 @@ class VpnProfile {
       'port': port,
       'outbound': outbound,
       'rawConfig': rawConfig,
+      'subscriptionExpiresAt': subscriptionExpiresAt?.toIso8601String(),
     };
   }
 
@@ -74,6 +77,41 @@ class VpnProfile {
       port: json['port'] as int?,
       outbound: (json['outbound'] as Map?)?.cast<String, dynamic>(),
       rawConfig: json['rawConfig'] as String?,
+      subscriptionExpiresAt: _parseDateTime(json['subscriptionExpiresAt']),
     );
+  }
+
+  VpnProfile copyWith({
+    String? id,
+    String? name,
+    VpnProfileKind? kind,
+    String? originalInput,
+    String? server,
+    int? port,
+    Map<String, dynamic>? outbound,
+    String? rawConfig,
+    DateTime? subscriptionExpiresAt,
+  }) {
+    return VpnProfile(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      kind: kind ?? this.kind,
+      originalInput: originalInput ?? this.originalInput,
+      server: server ?? this.server,
+      port: port ?? this.port,
+      outbound: outbound ?? this.outbound,
+      rawConfig: rawConfig ?? this.rawConfig,
+      subscriptionExpiresAt:
+          subscriptionExpiresAt ?? this.subscriptionExpiresAt,
+    );
+  }
+
+  static DateTime? _parseDateTime(Object? value) {
+    return switch (value) {
+      DateTime() => value.toUtc(),
+      int() => DateTime.fromMillisecondsSinceEpoch(value, isUtc: true),
+      String() => DateTime.tryParse(value)?.toUtc(),
+      _ => null,
+    };
   }
 }

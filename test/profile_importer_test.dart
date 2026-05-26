@@ -410,6 +410,23 @@ void main() {
     expect(profiles, hasLength(2));
   });
 
+  test('imports subscription expiration metadata from payload', () async {
+    const raw =
+        'subscription-userinfo: upload=0; download=0; total=1073741824; expire=1893456000\n'
+        'naive+https://user:pass@example.com:443#Naive';
+
+    final profile = (await ProfileImporter().importFromText(raw)).first;
+
+    expect(
+      profile.subscriptionExpiresAt,
+      DateTime.fromMillisecondsSinceEpoch(1893456000 * 1000, isUtc: true),
+    );
+    expect(
+      VpnProfile.fromJson(profile.toJson()).subscriptionExpiresAt,
+      profile.subscriptionExpiresAt,
+    );
+  });
+
   test('imports Remnawave Xray JSON subscription', () async {
     final payload = jsonEncode([
       {

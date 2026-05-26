@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.24 - 2026-05-26
+
+- Added subscription expiry metadata to saved profiles.
+- Imported subscription expiration from common subscription metadata such as
+  `subscription-userinfo: ... expire=...`.
+- Added a paid subscription countdown to the profile/network card.
+
 ## 1.0.23 - 2026-05-26
 
 - Fixed Android in-app update installation by registering the APK

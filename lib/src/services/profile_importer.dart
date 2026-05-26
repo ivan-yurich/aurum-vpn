@@ -13,6 +13,13 @@ class ProfileImportException implements Exception {
   String toString() => message;
 }
 
+class _FetchedSubscription {
+  const _FetchedSubscription({required this.body, this.expiresAt});
+
+  final String body;
+  final DateTime? expiresAt;
+}
+
 class ProfileImporter {
   static final _linkPattern = RegExp(
     "(?:vless://|naive\\+https://|naive://|hy2://|hysteria2://|hysteria://)[^\\s<>\"']+",
@@ -28,13 +35,17 @@ class ProfileImporter {
     final uri = Uri.tryParse(text);
     if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https')) {
       final fetched = await _fetchSubscription(uri);
-      return _parsePayload(fetched, source: text);
+      return _parsePayload(
+        fetched.body,
+        source: text,
+        subscriptionExpiresAt: fetched.expiresAt,
+      );
     }
 
     return _parsePayload(text, source: text);
   }
 
-  Future<String> _fetchSubscription(Uri uri) async {
+  Future<_FetchedSubscription> _fetchSubscription(Uri uri) async {
     final clients = [
       'sing-box/1.13.11 (Android; IvanVPN)',
       'HiddifyNext/2.5.7',
@@ -46,11 +57,12 @@ class ProfileImporter {
     for (final userAgent in clients) {
       for (final viaLocalProxy in const [false, true]) {
         try {
-          final body = await _get(
+          final fetched = await _get(
             uri,
             userAgent: userAgent,
             viaLocalProxy: viaLocalProxy,
           );
+          final body = fetched.body;
           if (_looksLikeHtml(body)) {
             lastError = ProfileImportException(
               '${_fetchModeLabel(viaLocalProxy)}: сервер вернул HTML-страницу вместо подписки.',
@@ -58,7 +70,7 @@ class ProfileImporter {
             continue;
           }
           if (_canParsePayload(body)) {
-            return body;
+            return fetched;
           }
           candidates.add(body);
         } on Object catch (error) {
@@ -70,7 +82,7 @@ class ProfileImporter {
     }
 
     if (candidates.isNotEmpty) {
-      return candidates.first;
+      return _FetchedSubscription(body: candidates.first);
     }
 
     throw ProfileImportException(
@@ -86,7 +98,7 @@ class ProfileImporter {
     }
   }
 
-  Future<String> _get(
+  Future<_FetchedSubscription> _get(
     Uri uri, {
     required String userAgent,
     bool viaLocalProxy = false,
@@ -111,7 +123,10 @@ class ProfileImporter {
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw ProfileImportException('HTTP ${response.statusCode}: $body');
       }
-      return body;
+      return _FetchedSubscription(
+        body: body,
+        expiresAt: _subscriptionExpiresAtFromHeaders(response.headers),
+      );
     } finally {
       client.close(force: true);
     }
@@ -121,52 +136,73 @@ class ProfileImporter {
     return viaLocalProxy ? 'fallback через активный VPN' : 'прямой запрос';
   }
 
-  List<VpnProfile> _parsePayload(String payload, {required String source}) {
+  List<VpnProfile> _parsePayload(
+    String payload, {
+    required String source,
+    DateTime? subscriptionExpiresAt,
+  }) {
     final text = payload.trim();
     if (text.isEmpty) {
       throw const ProfileImportException('Подписка пустая.');
     }
 
+    final detectedExpiresAt =
+        subscriptionExpiresAt ?? _subscriptionExpiresAtFromPayload(text);
+
     final jsonProfile = _tryParseJsonConfig(text, source: source);
     if (jsonProfile != null) {
-      return [jsonProfile];
+      return _withSubscriptionExpiresAt([jsonProfile], detectedExpiresAt);
     }
 
     final jsonLinks = _tryParseJsonLinks(text);
     if (jsonLinks.isNotEmpty) {
-      return jsonLinks;
+      return _withSubscriptionExpiresAt(jsonLinks, detectedExpiresAt);
     }
 
     final xrayProfiles = _tryParseXrayConfigs(text);
     if (xrayProfiles.isNotEmpty) {
-      return xrayProfiles;
+      return _withSubscriptionExpiresAt(xrayProfiles, detectedExpiresAt);
     }
 
     final links = _extractLinks(text);
     if (links.isNotEmpty) {
-      return _profilesFromLinks(links);
+      return _withSubscriptionExpiresAt(
+        _profilesFromLinks(links),
+        detectedExpiresAt,
+      );
     }
 
     final decoded = _tryDecodeBase64(text);
     if (decoded != null) {
+      final decodedExpiresAt =
+          detectedExpiresAt ?? _subscriptionExpiresAtFromPayload(decoded);
+
       final decodedJsonProfile = _tryParseJsonConfig(decoded, source: source);
       if (decodedJsonProfile != null) {
-        return [decodedJsonProfile];
+        return _withSubscriptionExpiresAt([
+          decodedJsonProfile,
+        ], decodedExpiresAt);
       }
 
       final decodedJsonLinks = _tryParseJsonLinks(decoded);
       if (decodedJsonLinks.isNotEmpty) {
-        return decodedJsonLinks;
+        return _withSubscriptionExpiresAt(decodedJsonLinks, decodedExpiresAt);
       }
 
       final decodedXrayProfiles = _tryParseXrayConfigs(decoded);
       if (decodedXrayProfiles.isNotEmpty) {
-        return decodedXrayProfiles;
+        return _withSubscriptionExpiresAt(
+          decodedXrayProfiles,
+          decodedExpiresAt,
+        );
       }
 
       final decodedLinks = _extractLinks(decoded);
       if (decodedLinks.isNotEmpty) {
-        return _profilesFromLinks(decodedLinks);
+        return _withSubscriptionExpiresAt(
+          _profilesFromLinks(decodedLinks),
+          decodedExpiresAt,
+        );
       }
     }
 
@@ -179,6 +215,135 @@ class ProfileImporter {
     throw const ProfileImportException(
       'Не нашёл поддерживаемых ссылок. Поддерживаются vless://, naive+https://, hy2://, hysteria:// и sing-box JSON.',
     );
+  }
+
+  DateTime? _subscriptionExpiresAtFromHeaders(HttpHeaders headers) {
+    final values = <String>[
+      ...?headers['subscription-userinfo'],
+      ...?headers['subscription-user-info'],
+      ...?headers['x-subscription-userinfo'],
+    ];
+
+    for (final value in values) {
+      final expiresAt = _subscriptionExpiresAtFromText(value);
+      if (expiresAt != null) {
+        return expiresAt;
+      }
+    }
+    return null;
+  }
+
+  DateTime? _subscriptionExpiresAtFromPayload(String text) {
+    final direct = _subscriptionExpiresAtFromText(text);
+    if (direct != null) {
+      return direct;
+    }
+
+    try {
+      return _subscriptionExpiresAtFromJson(jsonDecode(text));
+    } on FormatException {
+      return null;
+    }
+  }
+
+  DateTime? _subscriptionExpiresAtFromJson(Object? value) {
+    if (value is Map) {
+      for (final entry in value.entries) {
+        final key = entry.key.toString().toLowerCase();
+        if (const {
+          'expire',
+          'expires',
+          'expiry',
+          'expiresat',
+          'expires_at',
+          'expired_at',
+          'subscription_expires_at',
+        }.contains(key)) {
+          final parsed = _parseSubscriptionDate(entry.value);
+          if (parsed != null) {
+            return parsed;
+          }
+        }
+      }
+
+      for (final entry in value.entries) {
+        final parsed = _subscriptionExpiresAtFromJson(entry.value);
+        if (parsed != null) {
+          return parsed;
+        }
+      }
+    }
+
+    if (value is List) {
+      for (final item in value) {
+        final parsed = _subscriptionExpiresAtFromJson(item);
+        if (parsed != null) {
+          return parsed;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  DateTime? _subscriptionExpiresAtFromText(String value) {
+    final expireMatch = RegExp(
+      r'(?:^|[;,\s&?])(?:expire|expires|expiry|expires_at)=([^;,\s&]+)',
+      caseSensitive: false,
+    ).firstMatch(value);
+    if (expireMatch != null) {
+      return _parseSubscriptionDate(Uri.decodeComponent(expireMatch.group(1)!));
+    }
+
+    return null;
+  }
+
+  DateTime? _parseSubscriptionDate(Object? value) {
+    if (value == null) {
+      return null;
+    }
+
+    if (value is DateTime) {
+      return value.toUtc();
+    }
+
+    if (value is int) {
+      return _dateTimeFromTimestamp(value);
+    }
+
+    if (value is double) {
+      return _dateTimeFromTimestamp(value.round());
+    }
+
+    final text = value.toString().trim();
+    if (text.isEmpty || text == '0') {
+      return null;
+    }
+
+    final numeric = int.tryParse(text);
+    if (numeric != null) {
+      return _dateTimeFromTimestamp(numeric);
+    }
+
+    return DateTime.tryParse(text)?.toUtc();
+  }
+
+  DateTime _dateTimeFromTimestamp(int value) {
+    final milliseconds = value > 9999999999 ? value : value * 1000;
+    return DateTime.fromMillisecondsSinceEpoch(milliseconds, isUtc: true);
+  }
+
+  List<VpnProfile> _withSubscriptionExpiresAt(
+    List<VpnProfile> profiles,
+    DateTime? expiresAt,
+  ) {
+    if (expiresAt == null) {
+      return profiles;
+    }
+
+    return profiles
+        .map((profile) => profile.copyWith(subscriptionExpiresAt: expiresAt))
+        .toList(growable: false);
   }
 
   VpnProfile? _tryParseJsonConfig(String text, {required String source}) {
