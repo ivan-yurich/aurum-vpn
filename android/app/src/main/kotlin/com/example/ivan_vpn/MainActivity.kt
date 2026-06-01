@@ -1,5 +1,6 @@
 package online.dnsai.ivanvpn
 
+import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -51,13 +52,26 @@ class MainActivity : FlutterActivity() {
         }
 
         try {
-            val uri = FileProvider.getUriForFile(this, "$packageName.cache", apkFile)
-            val intent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
-                data = uri
+            val installFile = prepareInstallFile(apkFile)
+            val uri = FileProvider.getUriForFile(this, "$packageName.cache", installFile)
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, APK_MIME_TYPE)
+                clipData = ClipData.newUri(contentResolver, "Aurum VPN update", uri)
                 putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
-                putExtra(Intent.EXTRA_RETURN_RESULT, true)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val installers = packageManager.queryIntentActivities(intent, 0)
+            if (installers.isEmpty()) {
+                result.error("INSTALL_FAILED", "Android package installer was not found", null)
+                return
+            }
+            installers.forEach { resolveInfo ->
+                grantUriPermission(
+                    resolveInfo.activityInfo.packageName,
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
             }
 
             startActivity(intent)
@@ -65,6 +79,19 @@ class MainActivity : FlutterActivity() {
         } catch (error: Exception) {
             result.error("INSTALL_FAILED", error.message, null)
         }
+    }
+
+    private fun prepareInstallFile(source: File): File {
+        val safeName = source.name
+            .ifBlank { "AurumVPN-update.apk" }
+            .replace(Regex("[^A-Za-z0-9._-]"), "_")
+            .let { if (it.endsWith(".apk", ignoreCase = true)) it else "$it.apk" }
+        val updatesDir = File(cacheDir, "updates").apply { mkdirs() }
+        val target = File(updatesDir, safeName)
+        if (source.canonicalPath != target.canonicalPath) {
+            source.copyTo(target, overwrite = true)
+        }
+        return target
     }
 
     private fun openInstallSettings() {
@@ -75,5 +102,9 @@ class MainActivity : FlutterActivity() {
             ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(intent)
         }
+    }
+
+    private companion object {
+        const val APK_MIME_TYPE = "application/vnd.android.package-archive"
     }
 }

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.27 - 2026-06-01
+
+- Improved Android APK handoff for in-app updates on OEM firmware by copying
+  the downloaded APK into the app cache and opening it with a MIME-aware
+  installer intent.
+- Granted temporary APK read access to all matching Android package installers.
+
 ## 1.0.26 - 2026-06-01
 
 - Added a visible update channel line in the Updates panel so in-app update
