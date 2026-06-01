@@ -22,6 +22,11 @@ class Application {
         // Instance of the application context
         lateinit var application: Context
             private set
+        @Volatile
+        private var libboxInitialized = false
+        @Volatile
+        private var libboxInitializing = false
+        private val libboxLock = Any()
         
         // Quick access to common system services
         val powerManager: PowerManager by lazy { 
@@ -82,9 +87,29 @@ class Application {
             // Initialize config manager
             SimpleConfigManager.init(application)
             
-            @Suppress("OPT_IN_USAGE")
-            GlobalScope.launch(Dispatchers.IO) {
-                initializeLibbox(application)
+            var shouldInitializeLibbox = false
+            synchronized(libboxLock) {
+                if (!libboxInitialized && !libboxInitializing) {
+                    libboxInitializing = true
+                    shouldInitializeLibbox = true
+                }
+            }
+            if (shouldInitializeLibbox) {
+                @Suppress("OPT_IN_USAGE")
+                GlobalScope.launch(Dispatchers.IO) {
+                    try {
+                        initializeLibbox(application)
+                        synchronized(libboxLock) {
+                            libboxInitialized = true
+                            libboxInitializing = false
+                        }
+                    } catch (error: Exception) {
+                        synchronized(libboxLock) {
+                            libboxInitializing = false
+                        }
+                        android.util.Log.e("Application", "Failed to initialize libbox", error)
+                    }
+                }
             }
         }
         

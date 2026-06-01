@@ -377,6 +377,36 @@ class BoxService(
     }
 
     internal fun onDestroy() {
+        runCatching {
+            if (receiverRegistered) {
+                service.unregisterReceiver(receiver)
+                receiverRegistered = false
+            }
+        }
+        runCatching {
+            notification.stop()
+        }
+        runCatching {
+            fileDescriptor?.close()
+            fileDescriptor = null
+        }
+        runCatching {
+            commandServer?.closeService()
+            commandServer?.close()
+            commandServer = null
+        }
+        runCatching {
+            runBlocking {
+                DefaultNetworkMonitor.stop()
+            }
+        }
+        status.postValue(Status.Stopped)
+        Application.application.sendBroadcast(
+            Intent(Action.BROADCAST_STATUS_CHANGED).apply {
+                `package` = Application.application.packageName
+                putExtra(Action.EXTRA_STATUS, Status.Stopped.ordinal)
+            }
+        )
         binder.close()
     }
 

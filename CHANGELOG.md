@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.26 - 2026-06-01
+
+- Added a visible update channel line in the Updates panel so in-app update
+  tests clearly show that the GitHub Releases flow is active.
+- Prepared a new release build for Android auto-update validation.
+
+## 1.0.25 - 2026-06-01
+
+- Throttled live traffic UI updates so long VPN sessions do not rebuild the
+  home screen on every native counter event.
+- Added timeouts and best-effort handling around native VPN calls, reducing UI
+  hangs during start, stop, reconnect, and language changes.
+- Hardened Android service cleanup on destroy by closing the command server,
+  TUN file descriptor, network monitor, receiver, and notification.
+- Guarded sing-box/libbox initialization so Flutter engine reattach does not
+  launch duplicate setup jobs.
+- Disabled Android backup/data extraction for app data and explicitly blocked
+  cleartext traffic in the release manifest.
+
 ## 1.0.24 - 2026-05-26
 
 - Added subscription expiry metadata to saved profiles.

@@ -46,6 +46,8 @@ object DefaultNetworkMonitor {
 
     suspend fun stop() {
         android.util.Log.d("DefaultNetworkMonitor", "Stopping network monitor")
+        listener = null
+        defaultNetwork = null
         DefaultNetworkListener.stop(this)
     }
 

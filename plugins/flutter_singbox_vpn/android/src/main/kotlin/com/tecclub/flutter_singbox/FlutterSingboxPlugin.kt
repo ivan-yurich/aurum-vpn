@@ -448,7 +448,7 @@ class FlutterSingboxPlugin :
                         val bufferedLogs = logBuffer.toList()
                         Handler(Looper.getMainLooper()).post {
                             bufferedLogs.forEach { log ->
-                                logEventSink?.success(log)
+                                logEventSink?.success(mapOf("type" to "log", "message" to log))
                             }
                         }
                     }
@@ -467,10 +467,9 @@ class FlutterSingboxPlugin :
             }
         })
         
-        // Initialize Application class (we use the existing one from the package)
-        // We can call initialize from both places for redundancy
+        // Initialize Application class once; duplicate libbox setup can destabilize
+        // long-running sessions and reconnects.
         Application.initialize(context)
-        ApplicationHelper.initialize(context)
         
         // Register broadcast receivers
         context.registerReceiver(statusReceiver, IntentFilter(Action.BROADCAST_STATUS_CHANGED), 
@@ -494,11 +493,13 @@ class FlutterSingboxPlugin :
         // Clear event sinks
         statusEventSink = null
         trafficEventSink = null
+        logEventSink = null
         
         // Disconnect from service
         try {
             connection.disconnect()
             statusClient.disconnect()
+            logClient.disconnect()
             android.util.Log.e("FlutterSingboxPlugin", "Disconnected from service during detach")
         } catch (e: Exception) {
             android.util.Log.e("FlutterSingboxPlugin", "Error disconnecting from service during detach", e)

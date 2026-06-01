@@ -26,7 +26,10 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.24';
+const _appVersion = '1.0.26';
+const _nativeShortTimeout = Duration(seconds: 3);
+const _nativeConfigTimeout = Duration(seconds: 5);
+const _nativeStartTimeout = Duration(seconds: 8);
 
 class _ConnectionConfigPlan {
   const _ConnectionConfigPlan(this.naiveMode, this.label);
@@ -70,8 +73,10 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription<Map<String, dynamic>>? _trafficSubscription;
   StreamSubscription<Map<String, dynamic>>? _logSubscription;
   Timer? _logFlushTimer;
+  Timer? _trafficFlushTimer;
   Timer? _statusWatchdogTimer;
   DateTime? _ignoreStoppedUntil;
+  Map<String, dynamic>? _latestTrafficEvent;
 
   List<VpnProfile> _profiles = const [];
   String? _selectedProfileId;
@@ -85,6 +90,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _busy = false;
   bool _updateBusy = false;
   bool _stoppingByUser = false;
+  bool _statusWatchdogInFlight = false;
   bool _logsExpanded = false;
   String? _lastConfigSummary;
   String? _updateMessage;
@@ -123,6 +129,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _trafficSubscription?.cancel();
     _logSubscription?.cancel();
     _logFlushTimer?.cancel();
+    _trafficFlushTimer?.cancel();
     _statusWatchdogTimer?.cancel();
     _manualController.dispose();
     unawaited(_vpnEngine.dispose());
@@ -189,20 +196,44 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) {
         return;
       }
-      setState(() {
-        _uplink = event['formattedUplinkSpeed'] as String? ?? _uplink;
-        _downlink = event['formattedDownlinkSpeed'] as String? ?? _downlink;
-        _sessionTotal =
-            event['formattedSessionTotal'] as String? ?? _sessionTotal;
+      _latestTrafficEvent = event;
+      _trafficFlushTimer ??= Timer(const Duration(milliseconds: 500), () {
+        _trafficFlushTimer = null;
+        final latest = _latestTrafficEvent;
+        _latestTrafficEvent = null;
+        if (!mounted || latest == null) {
+          return;
+        }
+        setState(() {
+          _uplink = latest['formattedUplinkSpeed'] as String? ?? _uplink;
+          _downlink = latest['formattedDownlinkSpeed'] as String? ?? _downlink;
+          _sessionTotal =
+              latest['formattedSessionTotal'] as String? ?? _sessionTotal;
+        });
       });
     });
 
     try {
-      await _vpnEngine.setNotificationTitle(_appName);
-      await _vpnEngine.setNotificationDescription(s.notificationDescription);
-      await _vpnEngine.requestNotificationPermission();
-      final status = await _vpnEngine.getVPNStatus();
-      final bufferedLogs = await _vpnEngine.getLogs();
+      await _bestEffortNative(
+        'setNotificationTitle',
+        _vpnEngine.setNotificationTitle(_appName),
+      );
+      await _bestEffortNative(
+        'setNotificationDescription',
+        _vpnEngine.setNotificationDescription(s.notificationDescription),
+      );
+      await _bestEffortNative(
+        'requestNotificationPermission',
+        _vpnEngine.requestNotificationPermission(),
+      );
+      final status = await _vpnEngine.getVPNStatus().timeout(
+        _nativeShortTimeout,
+        onTimeout: () => _status,
+      );
+      final bufferedLogs = await _vpnEngine.getLogs().timeout(
+        const Duration(seconds: 2),
+        onTimeout: () => const <String>[],
+      );
       if (mounted) {
         setState(() {
           _status = status;
@@ -424,9 +455,12 @@ class _HomeScreenState extends State<HomeScreen> {
     _pendingLogs.clear();
     _logs.clear();
     _lastError = null;
-    await _vpnEngine.clearLogs();
+    await _bestEffortNative('clearLogs', _vpnEngine.clearLogs());
 
-    await _vpnEngine.requestNotificationPermission();
+    await _bestEffortNative(
+      'requestNotificationPermission',
+      _vpnEngine.requestNotificationPermission(),
+    );
 
     Object? lastStartError;
     var connected = false;
@@ -443,7 +477,11 @@ class _HomeScreenState extends State<HomeScreen> {
         config,
         target: _vpnEngine.configTarget,
       );
-      final saved = await _vpnEngine.saveConfig(config);
+      final saved = await _nativeCall(
+        'saveConfig',
+        _vpnEngine.saveConfig(config),
+        timeout: _nativeConfigTimeout,
+      );
       if (!saved) {
         throw StateError(s.configSaveFailed);
       }
@@ -463,7 +501,17 @@ class _HomeScreenState extends State<HomeScreen> {
           });
         }
 
-        final started = await _vpnEngine.startVPN();
+        bool started;
+        try {
+          started = await _nativeCall(
+            'startVPN',
+            _vpnEngine.startVPN(),
+            timeout: _nativeStartTimeout,
+          );
+        } on Object catch (error) {
+          started = false;
+          lastStartError = _redactSensitive('$error');
+        }
         if (started) {
           final finalStatus = await _waitForVpnStatus({
             AurumVpnStatus.started,
@@ -494,7 +542,11 @@ class _HomeScreenState extends State<HomeScreen> {
           );
           await _stopVpnCore(updateMessage: false);
           await Future<void>.delayed(const Duration(milliseconds: 1600));
-          await _vpnEngine.saveConfig(config);
+          await _bestEffortNative(
+            'saveConfig retry',
+            _vpnEngine.saveConfig(config),
+            timeout: _nativeConfigTimeout,
+          );
           _ignoreStoppedUntil = DateTime.now().add(const Duration(seconds: 14));
         }
       }
@@ -535,7 +587,10 @@ class _HomeScreenState extends State<HomeScreen> {
       if (status != AurumVpnStatus.stopped) {
         await _vpnEngine.stopVPN().timeout(
           const Duration(seconds: 5),
-          onTimeout: () => true,
+          onTimeout: () {
+            _queueLog('Native call timeout [stopVPN]');
+            return true;
+          },
         );
         final stoppedStatus = await _waitForVpnStatus({
           AurumVpnStatus.stopped,
@@ -565,7 +620,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<String> _refreshVpnStatus() async {
     try {
-      final status = await _vpnEngine.getVPNStatus();
+      final status = await _nativeCall(
+        'getVPNStatus',
+        _vpnEngine.getVPNStatus(),
+        timeout: _nativeShortTimeout,
+      );
       if (mounted) {
         setState(() => _status = status);
       }
@@ -592,24 +651,29 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _refreshStatusWatchdog() async {
-    if (!mounted || _busy) {
+    if (!mounted || _busy || _statusWatchdogInFlight) {
       return;
     }
 
-    final previous = _status;
-    final status = await _refreshVpnStatus();
-    final ignoreStopped =
-        _ignoreStoppedUntil != null &&
-        DateTime.now().isBefore(_ignoreStoppedUntil!);
-    if (previous == AurumVpnStatus.started &&
-        status == AurumVpnStatus.stopped &&
-        !_stoppingByUser &&
-        !ignoreStopped &&
-        mounted) {
-      setState(() {
-        _lastError = s.vpnStoppedUnexpectedly;
-        _message = s.openLogsMessage;
-      });
+    _statusWatchdogInFlight = true;
+    try {
+      final previous = _status;
+      final status = await _refreshVpnStatus();
+      final ignoreStopped =
+          _ignoreStoppedUntil != null &&
+          DateTime.now().isBefore(_ignoreStoppedUntil!);
+      if (previous == AurumVpnStatus.started &&
+          status == AurumVpnStatus.stopped &&
+          !_stoppingByUser &&
+          !ignoreStopped &&
+          mounted) {
+        setState(() {
+          _lastError = s.vpnStoppedUnexpectedly;
+          _message = s.openLogsMessage;
+        });
+      }
+    } finally {
+      _statusWatchdogInFlight = false;
     }
   }
 
@@ -708,9 +772,9 @@ class _HomeScreenState extends State<HomeScreen> {
       _message = strings.languageChanged;
     });
     try {
-      await _vpnEngine.setNotificationDescription(
-        strings.notificationDescription,
-      );
+      await _vpnEngine
+          .setNotificationDescription(strings.notificationDescription)
+          .timeout(_nativeShortTimeout);
     } on Object {
       // Native plugin is unavailable in widget tests and desktop preview.
     }
@@ -786,6 +850,32 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       },
     );
+  }
+
+  Future<T> _nativeCall<T>(
+    String label,
+    Future<T> future, {
+    required Duration timeout,
+  }) async {
+    try {
+      return await future.timeout(timeout);
+    } on TimeoutException {
+      final message = 'Native call timeout [$label]';
+      _queueLog(message);
+      throw TimeoutException(message, timeout);
+    }
+  }
+
+  Future<void> _bestEffortNative<T>(
+    String label,
+    Future<T> future, {
+    Duration timeout = _nativeShortTimeout,
+  }) async {
+    try {
+      await _nativeCall(label, future, timeout: timeout);
+    } on Object catch (error) {
+      _queueLog('Native call ignored [$label]: ${_redactSensitive('$error')}');
+    }
   }
 
   Future<void> _runBusy(
@@ -1775,6 +1865,23 @@ class _UpdatePanel extends StatelessWidget {
                   strings.updateDescription,
                   style: const TextStyle(color: _mutedGold, height: 1.35),
                 ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.verified_outlined,
+                      color: _goldSoft,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        strings.updateChannel,
+                        style: const TextStyle(color: _goldSoft, height: 1.25),
+                      ),
+                    ),
+                  ],
+                ),
                 if (busy) ...[
                   const SizedBox(height: 12),
                   LinearProgressIndicator(value: progress),
@@ -1952,6 +2059,7 @@ class _Strings {
     required this.developer,
     required this.updates,
     required this.updateDescription,
+    required this.updateChannel,
     required this.checkUpdates,
     required this.updateChecking,
     required this.updateInstallerOpened,
@@ -2021,6 +2129,7 @@ class _Strings {
   final String developer;
   final String updates;
   final String updateDescription;
+  final String updateChannel;
   final String checkUpdates;
   final String updateChecking;
   final String updateInstallerOpened;
@@ -2204,6 +2313,7 @@ class _Strings {
     updates: 'Обновления',
     updateDescription:
         'Приложение само проверит свежий APK, выберет файл под телефон и откроет установщик Android. Переходить на страницу релиза не нужно.',
+    updateChannel: 'Канал обновлений: GitHub Releases',
     checkUpdates: 'Проверить и установить',
     updateChecking: 'Проверяю обновления...',
     updateInstallerOpened: 'Установщик Android открыт',
@@ -2311,6 +2421,7 @@ class _Strings {
     updates: 'Updates',
     updateDescription:
         'The app checks for a fresh APK, picks the right file for this phone, and opens the Android installer. No release page is opened.',
+    updateChannel: 'Update channel: GitHub Releases',
     checkUpdates: 'Check and install',
     updateChecking: 'Checking updates...',
     updateInstallerOpened: 'Android installer opened',
