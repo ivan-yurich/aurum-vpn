@@ -127,6 +127,63 @@ class Application {
                 initialize(context)
             }
         }
+
+        /**
+         * Ensure libbox is ready before a background service starts the core.
+         * Service restarts can happen without a Flutter engine, so the async
+         * initialization path may still be running when BoxService starts.
+         */
+        fun ensureLibboxInitialized(context: Context) {
+            initializeIfNeeded(context)
+
+            var shouldInitialize = false
+            val deadline = System.currentTimeMillis() + 5000
+            while (true) {
+                var waitForInitializer = false
+                synchronized(libboxLock) {
+                    if (libboxInitialized) {
+                        return
+                    }
+                    if (!libboxInitializing) {
+                        libboxInitializing = true
+                        shouldInitialize = true
+                    } else {
+                        waitForInitializer = true
+                    }
+                }
+
+                if (shouldInitialize) {
+                    break
+                }
+
+                if (System.currentTimeMillis() >= deadline) {
+                    android.util.Log.w(
+                        "Application",
+                        "Timed out waiting for libbox initialization; continuing service start"
+                    )
+                    return
+                }
+                if (waitForInitializer) {
+                    Thread.sleep(50)
+                }
+            }
+
+            if (shouldInitialize) {
+                try {
+                    initializeLibbox(application)
+                    synchronized(libboxLock) {
+                        libboxInitialized = true
+                        libboxInitializing = false
+                    }
+                } catch (error: Exception) {
+                    synchronized(libboxLock) {
+                        libboxInitializing = false
+                    }
+                    android.util.Log.e("Application", "Failed to initialize libbox for service", error)
+                    throw error
+                }
+            }
+        }
         
         /**
          * Check if the application has been initialized

@@ -25,6 +25,7 @@ class BootReceiver : BroadcastReceiver() {
                         Log.d(TAG, "Auto-starting VPN service")
                         // Initialize Application context if needed
                         com.tecclub.flutter_singbox.Application.initializeIfNeeded(context.applicationContext)
+                        SimpleConfigManager.setStartedByUser(true)
                         BoxService.start()
                     }
                 } catch (e: Exception) {

@@ -211,11 +211,11 @@ class BoxService(
 
     @RequiresApi(Build.VERSION_CODES.M)
     private fun serviceUpdateIdleMode() {
-        if (Application.powerManager.isDeviceIdleMode) {
-            commandServer?.pause()
-        } else {
-            commandServer?.wake()
-        }
+        android.util.Log.d(
+            "BoxService",
+            "Device idle mode changed; keeping foreground VPN command server awake"
+        )
+        commandServer?.wake()
     }
 
     @OptIn(DelicateCoroutinesApi::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -277,6 +277,9 @@ class BoxService(
 
     private suspend fun stopAndAlert(type: Alert, message: String? = null) {
         android.util.Log.e("BoxService", "stopAndAlert called: ${type.name}, message: $message")
+        runCatching {
+            SimpleConfigManager.setStartedByUser(false)
+        }
         withContext(Dispatchers.Main) {
             // CRITICAL: Must call startForeground before stopping to avoid Android crash
             // When startForegroundService is called, we MUST call startForeground within ~5 seconds
@@ -320,7 +323,9 @@ class BoxService(
     @OptIn(DelicateCoroutinesApi::class)
     @Suppress("SameReturnValue")
     internal fun onStartCommand(): Int {
+        Application.initializeIfNeeded(service.applicationContext)
         android.util.Log.e("BoxService", "onStartCommand called, current status: ${status.value}")
+        val keepRunning = runCatching { SimpleConfigManager.getStartedByUser() }.getOrDefault(false)
         
         // CRITICAL: Call startForeground IMMEDIATELY to prevent Android from killing the app
         // This must happen synchronously before any async work
@@ -329,7 +334,7 @@ class BoxService(
         
         if (status.value != Status.Stopped) {
             android.util.Log.e("BoxService", "Service already running, not restarting")
-            return Service.START_NOT_STICKY
+            return if (keepRunning) Service.START_STICKY else Service.START_NOT_STICKY
         }
         
         android.util.Log.e("BoxService", "Setting status to Starting")
@@ -358,6 +363,8 @@ class BoxService(
         android.util.Log.e("BoxService", "Launching IO coroutine for service startup")
         GlobalScope.launch(Dispatchers.IO) {
             try {
+                android.util.Log.e("BoxService", "Ensuring libbox initialization")
+                Application.ensureLibboxInitialized(service.applicationContext)
                 android.util.Log.e("BoxService", "Starting command server")
                 startCommandServer()
             } catch (e: Exception) {
@@ -369,7 +376,7 @@ class BoxService(
             android.util.Log.e("BoxService", "Calling startService()")
             startService()
         }
-        return Service.START_NOT_STICKY
+        return if (keepRunning) Service.START_STICKY else Service.START_NOT_STICKY
     }
 
     internal fun onBind(): android.os.Binder {

@@ -826,6 +826,7 @@ class FlutterSingboxPlugin :
             _vpnStatus.value = Status.Starting
             android.util.Log.e("FlutterSingboxPlugin", "Set VPN status to Starting")
             sendStatusUpdate(Status.Starting)
+            SimpleConfigManager.setStartedByUser(true)
             
             // Reset session traffic counters
             sessionStartUplinkTotal = 0
@@ -862,6 +863,7 @@ class FlutterSingboxPlugin :
         } catch (e: Exception) {
             android.util.Log.e("FlutterSingboxPlugin", "Error starting VPN service: ${e.message}", e)
             isStarting = false
+            SimpleConfigManager.setStartedByUser(false)
             _vpnStatus.value = Status.Stopped
             result.error("START_VPN_ERROR", e.message, null)
         }
@@ -936,6 +938,7 @@ class FlutterSingboxPlugin :
             // Set shutting down flag and clear starting flag
             isShuttingDown = true
             isStarting = false
+            SimpleConfigManager.setStartedByUser(false)
             stopCleanupJob?.cancel()
             stopCleanupJob = null
             

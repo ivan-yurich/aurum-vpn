@@ -26,10 +26,12 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.27';
+const _appVersion = '1.0.29';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
+const _tunnelHealthProbeInterval = Duration(seconds: 65);
+const _tunnelHealthFailureThreshold = 2;
 
 class _ConnectionConfigPlan {
   const _ConnectionConfigPlan(this.naiveMode, this.label);
@@ -91,10 +93,16 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _updateBusy = false;
   bool _stoppingByUser = false;
   bool _statusWatchdogInFlight = false;
+  bool _tunnelHealthCheckInFlight = false;
+  bool _autoReconnectInFlight = false;
   bool _logsExpanded = false;
   String? _lastConfigSummary;
   String? _updateMessage;
   double? _updateProgress;
+  DateTime? _nextAutoReconnectAt;
+  DateTime? _nextTunnelHealthCheckAt;
+  int _autoReconnectAttempts = 0;
+  int _tunnelHealthFailures = 0;
   final _logs = <String>[];
   final _pendingLogs = <String>[];
 
@@ -171,10 +179,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
       final status = event['status'] as String?;
       if (status != null && mounted) {
+        var recoverUnexpectedStop = false;
         setState(() {
           _status = status;
           if (status == AurumVpnStatus.started) {
             _lastError = null;
+            _autoReconnectAttempts = 0;
+            _nextAutoReconnectAt = null;
             _ignoreStoppedUntil = DateTime.now().add(
               const Duration(seconds: 4),
             );
@@ -185,10 +196,12 @@ class _HomeScreenState extends State<HomeScreen> {
           if (status == AurumVpnStatus.stopped &&
               !_stoppingByUser &&
               !ignoreStopped) {
-            _lastError = s.vpnStoppedUnexpectedly;
-            _message = s.openLogsMessage;
+            recoverUnexpectedStop = true;
           }
         });
+        if (recoverUnexpectedStop) {
+          _markUnexpectedStop('status-event');
+        }
       }
     });
 
@@ -567,6 +580,12 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _selectedProfileId = profile.id;
         _lastError = null;
+        _autoReconnectAttempts = 0;
+        _nextAutoReconnectAt = null;
+        _tunnelHealthFailures = 0;
+        _nextTunnelHealthCheckAt = DateTime.now().add(
+          _tunnelHealthProbeInterval,
+        );
         _message = s.connectionProfile(profile.name);
       });
     }
@@ -667,13 +686,176 @@ class _HomeScreenState extends State<HomeScreen> {
           !_stoppingByUser &&
           !ignoreStopped &&
           mounted) {
-        setState(() {
-          _lastError = s.vpnStoppedUnexpectedly;
-          _message = s.openLogsMessage;
-        });
+        _markUnexpectedStop('watchdog');
+      } else if (status == AurumVpnStatus.started &&
+          !_stoppingByUser &&
+          !ignoreStopped) {
+        await _refreshTunnelHealth();
       }
     } finally {
       _statusWatchdogInFlight = false;
+    }
+  }
+
+  void _markUnexpectedStop(String source) {
+    if (!mounted || _stoppingByUser) {
+      return;
+    }
+
+    final profile = _selectedProfile;
+    _queueLog('VPN watchdog: unexpected stop detected from $source.');
+    setState(() {
+      _lastError = s.vpnStoppedUnexpectedly;
+      _message = profile == null
+          ? s.openLogsMessage
+          : '${s.vpnStoppedUnexpectedly}. ${s.connectingStatus(profile.name)}';
+    });
+    unawaited(_recoverUnexpectedStop(source));
+  }
+
+  Future<void> _refreshTunnelHealth() async {
+    if (_autoReconnectInFlight || _tunnelHealthCheckInFlight || !mounted) {
+      return;
+    }
+
+    final profile = _selectedProfile;
+    if (profile == null) {
+      return;
+    }
+
+    final now = DateTime.now();
+    final nextCheckAt = _nextTunnelHealthCheckAt;
+    if (nextCheckAt != null && now.isBefore(nextCheckAt)) {
+      return;
+    }
+
+    _nextTunnelHealthCheckAt = now.add(_tunnelHealthProbeInterval);
+    _tunnelHealthCheckInFlight = true;
+    try {
+      final healthy = await _probeLocalMixedProxy(
+        attempts: 1,
+        logFailures: false,
+      );
+      if (!mounted || _status != AurumVpnStatus.started) {
+        return;
+      }
+
+      if (healthy) {
+        _tunnelHealthFailures = 0;
+        return;
+      }
+
+      _tunnelHealthFailures += 1;
+      _queueLog(
+        'VPN watchdog: health probe failed #$_tunnelHealthFailures '
+        'for ${profile.name}.',
+      );
+
+      if (_tunnelHealthFailures >= _tunnelHealthFailureThreshold) {
+        _tunnelHealthFailures = 0;
+        _queueLog(
+          'VPN watchdog: tunnel is unhealthy, reconnecting ${profile.name}.',
+        );
+        if (mounted) {
+          setState(() {
+            _lastError = null;
+            _message = s.connectingStatus(profile.name);
+          });
+        }
+        unawaited(_recoverConnection('health-probe', forceRestart: true));
+      }
+    } finally {
+      _tunnelHealthCheckInFlight = false;
+    }
+  }
+
+  Future<void> _recoverUnexpectedStop(String source) {
+    return _recoverConnection(source, forceRestart: false);
+  }
+
+  Future<void> _recoverConnection(
+    String source, {
+    required bool forceRestart,
+  }) async {
+    if (_autoReconnectInFlight || _busy || _stoppingByUser || !mounted) {
+      return;
+    }
+
+    final profile = _selectedProfile;
+    if (profile == null) {
+      return;
+    }
+
+    final now = DateTime.now();
+    final nextAttemptAt = _nextAutoReconnectAt;
+    if (nextAttemptAt != null && now.isBefore(nextAttemptAt)) {
+      return;
+    }
+
+    _autoReconnectInFlight = true;
+    _autoReconnectAttempts += 1;
+    if (mounted) {
+      setState(() => _busy = true);
+    }
+    final attempt = _autoReconnectAttempts;
+    final delay = attempt == 1
+        ? const Duration(milliseconds: 900)
+        : attempt == 2
+        ? const Duration(seconds: 4)
+        : attempt == 3
+        ? const Duration(seconds: 10)
+        : const Duration(seconds: 20);
+    final cooldown = attempt <= 2
+        ? const Duration(seconds: 25)
+        : attempt <= 4
+        ? const Duration(seconds: 60)
+        : const Duration(seconds: 120);
+    _nextAutoReconnectAt = now.add(cooldown);
+
+    _queueLog(
+      'VPN watchdog: auto reconnect #$attempt from $source for ${profile.name}.',
+    );
+
+    try {
+      await Future<void>.delayed(delay);
+      if (!mounted || _stoppingByUser) {
+        return;
+      }
+
+      final status = await _refreshVpnStatus();
+      if (!forceRestart && status != AurumVpnStatus.stopped) {
+        _autoReconnectAttempts = 0;
+        _nextAutoReconnectAt = null;
+        return;
+      }
+
+      if (mounted) {
+        setState(() {
+          _lastError = null;
+          _message = s.connectingStatus(profile.name);
+        });
+      }
+
+      if (forceRestart && status != AurumVpnStatus.stopped) {
+        await _stopVpnCore(updateMessage: false);
+        await Future<void>.delayed(const Duration(milliseconds: 1200));
+      }
+
+      await _startVpnCore(profile);
+    } on Object catch (error) {
+      final errorText = _redactSensitive('$error');
+      _queueLog('VPN watchdog reconnect failed: $errorText');
+      if (mounted) {
+        setState(() {
+          _lastError = errorText;
+          _message = errorText;
+        });
+      }
+    } finally {
+      _autoReconnectInFlight = false;
+      if (mounted) {
+        setState(() => _busy = false);
+      }
     }
   }
 
@@ -696,7 +878,10 @@ class _HomeScreenState extends State<HomeScreen> {
     ];
   }
 
-  Future<bool> _probeLocalMixedProxy() async {
+  Future<bool> _probeLocalMixedProxy({
+    int attempts = 2,
+    bool logFailures = true,
+  }) async {
     final endpoints = <({Uri uri, bool allowCertificateMismatch})>[
       (
         uri: Uri.https('cp.cloudflare.com', '/generate_204'),
@@ -712,7 +897,7 @@ class _HomeScreenState extends State<HomeScreen> {
       (uri: Uri.https('1.1.1.1', '/'), allowCertificateMismatch: true),
     ];
 
-    for (var attempt = 1; attempt <= 2; attempt += 1) {
+    for (var attempt = 1; attempt <= attempts; attempt += 1) {
       for (final endpoint in endpoints) {
         final client = HttpClient()
           ..connectionTimeout = const Duration(seconds: 5)
@@ -740,17 +925,21 @@ class _HomeScreenState extends State<HomeScreen> {
           if (response.statusCode >= 200 && response.statusCode < 400) {
             return true;
           }
-          _queueLog(
-            'VPN health probe HTTP ${response.statusCode}: ${endpoint.uri}',
-          );
+          if (logFailures) {
+            _queueLog(
+              'VPN health probe HTTP ${response.statusCode}: ${endpoint.uri}',
+            );
+          }
         } on Object catch (error) {
-          _queueLog('VPN health probe failed: ${_redactSensitive('$error')}');
+          if (logFailures) {
+            _queueLog('VPN health probe failed: ${_redactSensitive('$error')}');
+          }
         } finally {
           client.close(force: true);
         }
       }
 
-      if (attempt == 1) {
+      if (attempt < attempts) {
         await Future<void>.delayed(const Duration(milliseconds: 700));
       }
     }

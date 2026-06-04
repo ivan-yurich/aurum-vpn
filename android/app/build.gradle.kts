@@ -42,6 +42,12 @@ android {
         }
     }
 
+    lint {
+        // Flutter rewrites android/local.properties with Windows paths during
+        // builds. That generated local file is not shipped in the APK.
+        disable += "PropertyEscape"
+    }
+
     signingConfigs {
         create("release") {
             keyAlias = keystoreProperties["keyAlias"] as String

@@ -31,6 +31,7 @@ class VPNService : VpnService(), PlatformInterfaceWrapper {
     var systemProxyEnabled = false
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Application.initializeIfNeeded(applicationContext)
         android.util.Log.e("VPNService", "onStartCommand called with intent: ${intent?.action}")
         
         // Extract config content if available
