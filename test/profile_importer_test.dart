@@ -83,15 +83,7 @@ void main() {
       'inet4_range': '198.18.0.0/15',
       'inet6_range': 'fc00::/18',
     });
-    expect(dnsServers[2], {
-      'type': 'https',
-      'tag': 'global-dns',
-      'server': '1.1.1.1',
-      'server_port': 443,
-      'path': '/dns-query',
-      'tls': {'enabled': true, 'server_name': 'cloudflare-dns.com'},
-      'detour': 'proxy',
-    });
+    expect(dnsServers, hasLength(2));
     expect((config['dns'] as Map<String, dynamic>)['rules'], [
       {
         'domain': ['example.com'],
@@ -105,7 +97,7 @@ void main() {
         'server': 'fakeip',
       },
     ]);
-    expect((config['dns'] as Map<String, dynamic>)['final'], 'global-dns');
+    expect((config['dns'] as Map<String, dynamic>)['final'], 'local-dns');
 
     final inbounds = (config['inbounds'] as List)
         .whereType<Map<String, dynamic>>()

@@ -26,12 +26,14 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.29';
+const _appVersion = '1.0.30';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
 const _tunnelHealthProbeInterval = Duration(seconds: 65);
 const _tunnelHealthFailureThreshold = 2;
+const _maxStoredLogs = 180;
+const _maxPendingLogs = 240;
 
 class _ConnectionConfigPlan {
   const _ConnectionConfigPlan(this.naiveMode, this.label);
@@ -77,10 +79,16 @@ class _HomeScreenState extends State<HomeScreen> {
   Timer? _logFlushTimer;
   Timer? _trafficFlushTimer;
   Timer? _statusWatchdogTimer;
+  Timer? _uptimeTimer;
   DateTime? _ignoreStoppedUntil;
+  DateTime? _connectedSince;
+  DateTime _clockNow = DateTime.now();
   Map<String, dynamic>? _latestTrafficEvent;
 
   List<VpnProfile> _profiles = const [];
+  final _profilePingMs = <String, int>{};
+  final _profilePingBusy = <String, bool>{};
+  final _profilePingError = <String, String>{};
   String? _selectedProfileId;
   _AppLanguage _language = _AppLanguage.ru;
   String _status = AurumVpnStatus.stopped;
@@ -95,6 +103,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _statusWatchdogInFlight = false;
   bool _tunnelHealthCheckInFlight = false;
   bool _autoReconnectInFlight = false;
+  bool _autoRecoveryArmed = false;
+  bool _pingAllInFlight = false;
   bool _logsExpanded = false;
   String? _lastConfigSummary;
   String? _updateMessage;
@@ -107,6 +117,15 @@ class _HomeScreenState extends State<HomeScreen> {
   final _pendingLogs = <String>[];
 
   _Strings get s => _Strings.forLanguage(_language);
+
+  Duration? get _connectedDuration {
+    final since = _connectedSince;
+    if (since == null || _status != AurumVpnStatus.started) {
+      return null;
+    }
+    final duration = _clockNow.difference(since);
+    return duration.isNegative ? Duration.zero : duration;
+  }
 
   VpnProfile? get _selectedProfile {
     for (final profile in _profiles) {
@@ -129,6 +148,12 @@ class _HomeScreenState extends State<HomeScreen> {
       const Duration(seconds: 20),
       (_) => unawaited(_refreshStatusWatchdog()),
     );
+    _uptimeTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || _status != AurumVpnStatus.started) {
+        return;
+      }
+      setState(() => _clockNow = DateTime.now());
+    });
   }
 
   @override
@@ -139,6 +164,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _logFlushTimer?.cancel();
     _trafficFlushTimer?.cancel();
     _statusWatchdogTimer?.cancel();
+    _uptimeTimer?.cancel();
     _manualController.dispose();
     unawaited(_vpnEngine.dispose());
     super.dispose();
@@ -164,6 +190,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ? strings.addProfileHint
           : strings.loadedProfiles(profiles.length);
     });
+    unawaited(_pingProfiles(profiles));
   }
 
   Future<void> _initVpn() async {
@@ -186,14 +213,21 @@ class _HomeScreenState extends State<HomeScreen> {
             _lastError = null;
             _autoReconnectAttempts = 0;
             _nextAutoReconnectAt = null;
+            _autoRecoveryArmed = true;
+            _connectedSince ??= DateTime.now();
+            _clockNow = DateTime.now();
             _ignoreStoppedUntil = DateTime.now().add(
               const Duration(seconds: 4),
             );
+          }
+          if (status == AurumVpnStatus.stopped && !_autoRecoveryArmed) {
+            _connectedSince = null;
           }
           final ignoreStopped =
               _ignoreStoppedUntil != null &&
               DateTime.now().isBefore(_ignoreStoppedUntil!);
           if (status == AurumVpnStatus.stopped &&
+              _autoRecoveryArmed &&
               !_stoppingByUser &&
               !ignoreStopped) {
             recoverUnexpectedStop = true;
@@ -250,6 +284,14 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() {
           _status = status;
+          if (status == AurumVpnStatus.started) {
+            _autoRecoveryArmed = true;
+            _connectedSince ??= DateTime.now();
+            _clockNow = DateTime.now();
+          } else if (status == AurumVpnStatus.stopped) {
+            _autoRecoveryArmed = false;
+            _connectedSince = null;
+          }
           _logs
             ..clear()
             ..addAll(
@@ -258,7 +300,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   .where((log) => log.isNotEmpty)
                   .toList()
                   .reversed
-                  .take(60)
+                  .take(_maxStoredLogs)
                   .toList()
                   .reversed,
             );
@@ -406,6 +448,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _selectedProfileId = imported.first.id;
         _message = s.imported(imported.length);
       });
+      unawaited(_pingProfiles(merged));
       _showSnack(s.importedProfiles(imported.length));
     });
   }
@@ -434,6 +477,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _message = s.selectedProfile(profile.name);
       });
       await _store.saveSelectedProfileId(profile.id);
+      unawaited(_pingProfile(profile));
       return;
     }
 
@@ -450,10 +494,15 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    await _runBusy(
-      () => _startVpnCore(profile),
-      message: s.connectingTo(profile.name),
-    );
+    _autoRecoveryArmed = true;
+    await _runBusy(() async {
+      try {
+        await _startVpnCore(profile);
+      } on Object {
+        _autoRecoveryArmed = false;
+        rethrow;
+      }
+    }, message: s.connectingTo(profile.name));
   }
 
   Future<void> _startVpnCore(VpnProfile profile) async {
@@ -583,6 +632,9 @@ class _HomeScreenState extends State<HomeScreen> {
         _autoReconnectAttempts = 0;
         _nextAutoReconnectAt = null;
         _tunnelHealthFailures = 0;
+        _autoRecoveryArmed = true;
+        _connectedSince ??= DateTime.now();
+        _clockNow = DateTime.now();
         _nextTunnelHealthCheckAt = DateTime.now().add(
           _tunnelHealthProbeInterval,
         );
@@ -592,6 +644,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _disconnect() async {
+    _autoRecoveryArmed = false;
     await _runBusy(() => _stopVpnCore(), message: s.disconnectingVpn);
   }
 
@@ -626,6 +679,10 @@ class _HomeScreenState extends State<HomeScreen> {
           _status = AurumVpnStatus.stopped;
           _uplink = '0 B/s';
           _downlink = '0 B/s';
+          if (updateMessage) {
+            _autoRecoveryArmed = false;
+            _connectedSince = null;
+          }
           _lastError = null;
           if (updateMessage) {
             _message = s.vpnStopped;
@@ -683,11 +740,13 @@ class _HomeScreenState extends State<HomeScreen> {
           DateTime.now().isBefore(_ignoreStoppedUntil!);
       if (previous == AurumVpnStatus.started &&
           status == AurumVpnStatus.stopped &&
+          _autoRecoveryArmed &&
           !_stoppingByUser &&
           !ignoreStopped &&
           mounted) {
         _markUnexpectedStop('watchdog');
       } else if (status == AurumVpnStatus.started &&
+          _autoRecoveryArmed &&
           !_stoppingByUser &&
           !ignoreStopped) {
         await _refreshTunnelHealth();
@@ -698,7 +757,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _markUnexpectedStop(String source) {
-    if (!mounted || _stoppingByUser) {
+    if (!mounted || _stoppingByUser || !_autoRecoveryArmed) {
       return;
     }
 
@@ -945,6 +1004,165 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     return false;
+  }
+
+  Future<void> _pingProfiles(List<VpnProfile> profiles) async {
+    if (_pingAllInFlight || profiles.isEmpty) {
+      return;
+    }
+
+    _pingAllInFlight = true;
+    try {
+      for (final profile in profiles.take(16)) {
+        if (!mounted) {
+          return;
+        }
+        await _pingProfile(profile);
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+      }
+    } finally {
+      _pingAllInFlight = false;
+    }
+  }
+
+  Future<void> _pingProfile(VpnProfile profile) async {
+    final server = profile.server?.trim();
+    final port = profile.port ?? 443;
+    if (server == null || server.isEmpty || port <= 0) {
+      return;
+    }
+    if (_profilePingBusy[profile.id] == true) {
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _profilePingBusy[profile.id] = true;
+        _profilePingError.remove(profile.id);
+      });
+    }
+
+    final stopwatch = Stopwatch()..start();
+    Socket? socket;
+    try {
+      socket = await Socket.connect(
+        server,
+        port,
+        timeout: const Duration(seconds: 4),
+      );
+      stopwatch.stop();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _profilePingMs[profile.id] = stopwatch.elapsedMilliseconds;
+        _profilePingError.remove(profile.id);
+      });
+    } on Object catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _profilePingMs.remove(profile.id);
+        _profilePingError[profile.id] = _redactSensitive('$error');
+      });
+    } finally {
+      socket?.destroy();
+      if (mounted) {
+        setState(() => _profilePingBusy[profile.id] = false);
+      }
+    }
+  }
+
+  String _profilePingLabel(VpnProfile profile) {
+    if (_profilePingBusy[profile.id] == true) {
+      return '...';
+    }
+    final ms = _profilePingMs[profile.id];
+    if (ms != null) {
+      return '$ms ms';
+    }
+    if (_profilePingError.containsKey(profile.id)) {
+      return 'offline';
+    }
+    return 'ping';
+  }
+
+  String? _profileCountryFlag(VpnProfile profile) {
+    final existing = _leadingFlag(profile.name);
+    if (existing != null) {
+      return existing;
+    }
+
+    final haystack = '${profile.name} ${profile.server ?? ''}'.toLowerCase();
+    if (haystack.contains('росси') ||
+        haystack.contains('russia') ||
+        haystack.endsWith('.ru') ||
+        haystack.endsWith('.su') ||
+        haystack.endsWith('.рф')) {
+      return '🇷🇺';
+    }
+    if (haystack.contains('фин') ||
+        haystack.contains('finland') ||
+        haystack.endsWith('.fi')) {
+      return '🇫🇮';
+    }
+    if (haystack.contains('герман') ||
+        haystack.contains('germany') ||
+        haystack.endsWith('.de')) {
+      return '🇩🇪';
+    }
+    if (haystack.contains('сша') ||
+        haystack.contains('usa') ||
+        haystack.contains('america') ||
+        haystack.endsWith('.us')) {
+      return '🇺🇸';
+    }
+    if (haystack.contains('japan') || haystack.contains('япон')) {
+      return '🇯🇵';
+    }
+    if (haystack.contains('netherlands') || haystack.contains('нидер')) {
+      return '🇳🇱';
+    }
+    return null;
+  }
+
+  String _profileDisplayName(VpnProfile profile) {
+    final trimmed = profile.name.trimLeft();
+    if (_leadingFlag(trimmed) != null) {
+      return String.fromCharCodes(trimmed.runes.skip(2)).trimLeft();
+    }
+    return profile.name;
+  }
+
+  String? _leadingFlag(String value) {
+    final runes = value.trimLeft().runes.take(2).toList(growable: false);
+    if (runes.length < 2) {
+      return null;
+    }
+    final isFlag = runes.every((rune) => rune >= 0x1F1E6 && rune <= 0x1F1FF);
+    return isFlag ? String.fromCharCodes(runes) : null;
+  }
+
+  String _formatDuration(Duration? duration) {
+    if (duration == null) {
+      return '00:00';
+    }
+    final totalSeconds = duration.inSeconds;
+    final hours = totalSeconds ~/ 3600;
+    final minutes = (totalSeconds % 3600) ~/ 60;
+    final seconds = totalSeconds % 60;
+    if (hours > 0) {
+      return [
+        hours.toString().padLeft(2, '0'),
+        minutes.toString().padLeft(2, '0'),
+        seconds.toString().padLeft(2, '0'),
+      ].join(':');
+    }
+    return [
+      minutes.toString().padLeft(2, '0'),
+      seconds.toString().padLeft(2, '0'),
+    ].join(':');
   }
 
   Future<void> _setLanguage(_AppLanguage language) async {
@@ -1211,29 +1429,55 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _buildDiagnosticReport() {
     final profile = _selectedProfile;
+    final now = DateTime.now();
     final lines = <String>[
       '$_appName diagnostic',
       'app_version: $_appVersion',
+      'generated_local: ${now.toIso8601String()}',
+      'generated_utc: ${now.toUtc().toIso8601String()}',
+      'platform: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}',
+      'locale: ${Platform.localeName}',
       'config_target: ${_vpnEngine.configTarget.name}',
       if (_lastConfigSummary != null) 'config: $_lastConfigSummary',
       'status: $_status',
       'message: ${_redactSensitive(_message)}',
       if (_lastError != null) 'last_error: $_lastError',
+      'uptime: ${_formatDuration(_connectedDuration)}',
+      'auto_recovery_armed: $_autoRecoveryArmed',
+      'auto_reconnect_attempts: $_autoReconnectAttempts',
+      'health_failures: $_tunnelHealthFailures',
       if (profile != null) ...[
         'profile: ${_redactSensitive(profile.name)}',
         'protocol: ${_profileKindLabel(profile.kind)}',
         'endpoint: ${_redactSensitive(profile.endpoint)}',
+        'country: ${_profileCountryFlag(profile) ?? 'unknown'}',
+        'profile_ping: ${_profilePingLabel(profile)}',
       ],
       'traffic: up=$_uplink down=$_downlink total=$_sessionTotal',
+      '',
+      'profiles:',
+      if (_profiles.isEmpty)
+        'none'
+      else
+        ..._profiles.map((item) {
+          final expires = item.subscriptionExpiresAt?.toUtc().toIso8601String();
+          return [
+            '- ${_redactSensitive(item.name)}',
+            _profileKindLabel(item.kind),
+            _redactSensitive(item.endpoint),
+            'country=${_profileCountryFlag(item) ?? 'unknown'}',
+            'ping=${_profilePingLabel(item)}',
+            if (expires != null) 'expires=$expires',
+          ].join(' | ');
+        }),
       '',
       'logs:',
     ];
 
-    final safeLogs = _logs
-        .take(_logs.length)
+    final safeLogs = [..._logs, ..._pendingLogs]
         .toList()
         .reversed
-        .take(35)
+        .take(120)
         .toList()
         .reversed
         .where((log) => !_isDiagnosticNoise(log))
@@ -1418,8 +1662,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     _pendingLogs.add(cleaned);
-    if (_pendingLogs.length > 120) {
-      _pendingLogs.removeRange(0, _pendingLogs.length - 120);
+    if (_pendingLogs.length > _maxPendingLogs) {
+      _pendingLogs.removeRange(0, _pendingLogs.length - _maxPendingLogs);
     }
 
     _logFlushTimer ??= Timer(const Duration(milliseconds: 250), () {
@@ -1431,8 +1675,8 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _logs.addAll(_pendingLogs);
         _pendingLogs.clear();
-        if (_logs.length > 60) {
-          _logs.removeRange(0, _logs.length - 60);
+        if (_logs.length > _maxStoredLogs) {
+          _logs.removeRange(0, _logs.length - _maxStoredLogs);
         }
       });
     });
@@ -1469,7 +1713,9 @@ class _HomeScreenState extends State<HomeScreen> {
               message: _message,
               uplink: _uplink,
               downlink: _downlink,
-              sessionTotal: _sessionTotal,
+              uptime: _formatDuration(_connectedDuration),
+              onToggle: _toggleVpn,
+              toggleEnabled: !_busy && selected != null,
             ),
             const SizedBox(height: 14),
             FilledButton.icon(
@@ -1493,6 +1739,10 @@ class _HomeScreenState extends State<HomeScreen> {
               onQr: selected == null ? null : _showQr,
               onDelete: selected == null ? null : _deleteSelected,
               kindLabel: _profileKindLabel,
+              displayName: _profileDisplayName,
+              countryFlag: _profileCountryFlag,
+              pingLabel: _profilePingLabel,
+              onPing: (profile) => unawaited(_pingProfile(profile)),
             ),
             const SizedBox(height: 16),
             _SupportPanel(
@@ -1538,7 +1788,9 @@ class _StatusPanel extends StatelessWidget {
     required this.message,
     required this.uplink,
     required this.downlink,
-    required this.sessionTotal,
+    required this.uptime,
+    required this.onToggle,
+    required this.toggleEnabled,
   });
 
   final _Strings strings;
@@ -1546,7 +1798,9 @@ class _StatusPanel extends StatelessWidget {
   final String message;
   final String uplink;
   final String downlink;
-  final String sessionTotal;
+  final String uptime;
+  final VoidCallback onToggle;
+  final bool toggleEnabled;
 
   @override
   Widget build(BuildContext context) {
@@ -1559,7 +1813,7 @@ class _StatusPanel extends StatelessWidget {
     };
 
     return SizedBox(
-      height: 188,
+      height: 176,
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: _surface,
@@ -1610,17 +1864,74 @@ class _StatusPanel extends StatelessWidget {
                   Expanded(
                     child: _Metric(label: '↓', value: downlink, fixed: true),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _Metric(
-                      label: 'Σ',
-                      value: sessionTotal,
-                      fixed: true,
-                    ),
+                  const SizedBox(width: 14),
+                  _UptimeButton(
+                    connected: connected,
+                    uptime: uptime,
+                    enabled: toggleEnabled,
+                    onPressed: onToggle,
                   ),
                 ],
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _UptimeButton extends StatelessWidget {
+  const _UptimeButton({
+    required this.connected,
+    required this.uptime,
+    required this.enabled,
+    required this.onPressed,
+  });
+
+  final bool connected;
+  final String uptime;
+  final bool enabled;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: connected ? 'Время работы VPN' : 'Подключить',
+      child: Material(
+        color: connected ? _gold : _surfaceMetric,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: enabled ? onPressed : null,
+          child: SizedBox.square(
+            dimension: 72,
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    connected ? Icons.timer_outlined : Icons.power_settings_new,
+                    color: connected ? _ink : _goldSoft,
+                    size: 18,
+                  ),
+                  const SizedBox(height: 3),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      uptime,
+                      maxLines: 1,
+                      style: TextStyle(
+                        color: connected ? _ink : _goldSoft,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       ),
@@ -1676,6 +1987,10 @@ class _ProfilePanel extends StatelessWidget {
     required this.onQr,
     required this.onDelete,
     required this.kindLabel,
+    required this.displayName,
+    required this.countryFlag,
+    required this.pingLabel,
+    required this.onPing,
   });
 
   final _Strings strings;
@@ -1688,6 +2003,10 @@ class _ProfilePanel extends StatelessWidget {
   final VoidCallback? onQr;
   final VoidCallback? onDelete;
   final String Function(VpnProfileKind kind) kindLabel;
+  final String Function(VpnProfile profile) displayName;
+  final String? Function(VpnProfile profile) countryFlag;
+  final String Function(VpnProfile profile) pingLabel;
+  final ValueChanged<VpnProfile> onPing;
 
   @override
   Widget build(BuildContext context) {
@@ -1736,6 +2055,10 @@ class _ProfilePanel extends StatelessWidget {
                 selected: profile.id == selectedId,
                 onTap: () => onSelect(profile),
                 kindLabel: kindLabel,
+                displayName: displayName(profile),
+                countryFlag: countryFlag(profile),
+                pingLabel: pingLabel(profile),
+                onPing: () => onPing(profile),
               ),
             ),
           ),
@@ -1744,6 +2067,15 @@ class _ProfilePanel extends StatelessWidget {
           strings: strings,
           profile: selectedProfile,
           kindLabel: kindLabel,
+          countryFlag: selectedProfile == null
+              ? null
+              : countryFlag(selectedProfile!),
+          pingLabel: selectedProfile == null
+              ? null
+              : pingLabel(selectedProfile!),
+          onPing: selectedProfile == null
+              ? null
+              : () => onPing(selectedProfile!),
         ),
       ],
     );
@@ -1756,12 +2088,20 @@ class _ProfileTile extends StatelessWidget {
     required this.selected,
     required this.onTap,
     required this.kindLabel,
+    required this.displayName,
+    required this.countryFlag,
+    required this.pingLabel,
+    required this.onPing,
   });
 
   final VpnProfile profile;
   final bool selected;
   final VoidCallback onTap;
   final String Function(VpnProfileKind kind) kindLabel;
+  final String displayName;
+  final String? countryFlag;
+  final String pingLabel;
+  final VoidCallback onPing;
 
   @override
   Widget build(BuildContext context) {
@@ -1777,19 +2117,26 @@ class _ProfileTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(switch (profile.kind) {
-              VpnProfileKind.naive => Icons.public,
-              VpnProfileKind.hysteria2 ||
-              VpnProfileKind.hysteria => Icons.speed_outlined,
-              _ => Icons.bolt,
-            }, color: selected ? _goldSoft : _mutedGold),
+            SizedBox(
+              width: 32,
+              child: Center(
+                child: countryFlag == null
+                    ? Icon(switch (profile.kind) {
+                        VpnProfileKind.naive => Icons.public,
+                        VpnProfileKind.hysteria2 ||
+                        VpnProfileKind.hysteria => Icons.speed_outlined,
+                        _ => Icons.bolt,
+                      }, color: selected ? _goldSoft : _mutedGold)
+                    : Text(countryFlag!, style: const TextStyle(fontSize: 22)),
+              ),
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    profile.name,
+                    displayName,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.titleSmall,
@@ -1802,6 +2149,33 @@ class _ProfileTile extends StatelessWidget {
                     style: const TextStyle(color: _mutedGold),
                   ),
                 ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            InkResponse(
+              onTap: onPing,
+              radius: 28,
+              child: Container(
+                constraints: const BoxConstraints(minWidth: 64),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                decoration: BoxDecoration(
+                  color: _surfaceMetric,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: _gold.withValues(alpha: 0.18)),
+                ),
+                alignment: Alignment.center,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    pingLabel,
+                    maxLines: 1,
+                    style: const TextStyle(
+                      color: _goldSoft,
+                      fontSize: 12,
+                      letterSpacing: 0,
+                    ),
+                  ),
+                ),
               ),
             ),
           ],
@@ -1836,11 +2210,17 @@ class _ProfileInsightPanel extends StatelessWidget {
     required this.strings,
     required this.profile,
     required this.kindLabel,
+    required this.countryFlag,
+    required this.pingLabel,
+    required this.onPing,
   });
 
   final _Strings strings;
   final VpnProfile? profile;
   final String Function(VpnProfileKind kind) kindLabel;
+  final String? countryFlag;
+  final String? pingLabel;
+  final VoidCallback? onPing;
 
   @override
   Widget build(BuildContext context) {
@@ -1893,10 +2273,17 @@ class _ProfileInsightPanel extends StatelessWidget {
                         label: strings.dnsLabel,
                         value: strings.dnsCountryValue,
                       ),
-                      _Metric(
-                        label: strings.subscriptionLabel,
-                        value: strings.subscriptionStatus(
-                          profile!.subscriptionExpiresAt,
+                      if (countryFlag != null)
+                        _Metric(
+                          label: strings.countryLabel,
+                          value: countryFlag!,
+                        ),
+                      InkWell(
+                        onTap: onPing,
+                        borderRadius: BorderRadius.circular(8),
+                        child: _Metric(
+                          label: strings.pingLabel,
+                          value: pingLabel ?? 'ping',
                         ),
                       ),
                     ],
@@ -2234,6 +2621,8 @@ class _Strings {
     required this.networkLabel,
     required this.dnsLabel,
     required this.dnsCountryValue,
+    required this.countryLabel,
+    required this.pingLabel,
     required this.subscriptionLabel,
     required this.subscriptionUnknown,
     required this.subscriptionExpired,
@@ -2304,6 +2693,8 @@ class _Strings {
   final String networkLabel;
   final String dnsLabel;
   final String dnsCountryValue;
+  final String countryLabel;
+  final String pingLabel;
   final String subscriptionLabel;
   final String subscriptionUnknown;
   final String subscriptionExpired;
@@ -2485,13 +2876,15 @@ class _Strings {
     protocolLabel: 'Протокол',
     networkLabel: 'Сеть',
     dnsLabel: 'DNS',
-    dnsCountryValue: 'Защищённый DNS',
+    dnsCountryValue: 'DNS сервера VPN',
+    countryLabel: 'Страна',
+    pingLabel: 'Пинг',
     subscriptionLabel: 'Подписка',
     subscriptionUnknown: 'Срок не указан',
     subscriptionExpired: 'Истекла',
     mobileReady: 'Wi‑Fi / LTE',
     mobileNetworkAdvice:
-        'Подключение настроено для стабильной работы в Wi‑Fi и мобильных сетях. DNS-запросы идут через туннель, а при смене профиля приложение полностью пересобирает конфиг.',
+        'Подключение настроено для Wi‑Fi и мобильных сетей. DNS работает в режиме сервера VPN: приложение не подменяет страну отдельным DoH, а при смене профиля полностью пересобирает конфиг.',
     endpointLabel: 'Сервер',
     connect: 'Подключить',
     disconnect: 'Отключить',
@@ -2534,7 +2927,7 @@ class _Strings {
       _FaqItem(
         question: 'Почему теперь лучше работает мобильная сеть?',
         answer:
-            'Приложение использует единый сетевой режим для Wi‑Fi и LTE: защищённый DNS, аккуратное переподключение и устойчивую маршрутизацию через туннель.',
+            'Приложение использует единый сетевой режим для Wi‑Fi и LTE: DNS сервера VPN, аккуратное переподключение и устойчивую маршрутизацию через туннель.',
       ),
       _FaqItem(
         question: 'Безопасно ли отправлять отчёт?',
@@ -2593,13 +2986,15 @@ class _Strings {
     protocolLabel: 'Protocol',
     networkLabel: 'Network',
     dnsLabel: 'DNS',
-    dnsCountryValue: 'Protected DNS',
+    dnsCountryValue: 'VPN server DNS',
+    countryLabel: 'Country',
+    pingLabel: 'Ping',
     subscriptionLabel: 'Subscription',
     subscriptionUnknown: 'Not provided',
     subscriptionExpired: 'Expired',
     mobileReady: 'Wi‑Fi / LTE',
     mobileNetworkAdvice:
-        'The connection is tuned for stable Wi‑Fi and mobile networks. DNS requests stay inside the tunnel, and the app rebuilds the config when switching profiles.',
+        'The connection is tuned for Wi‑Fi and mobile networks. DNS follows the VPN server mode instead of forcing a separate DoH resolver, and the app rebuilds the config when switching profiles.',
     endpointLabel: 'Server',
     connect: 'Connect',
     disconnect: 'Disconnect',
@@ -2642,7 +3037,7 @@ class _Strings {
       _FaqItem(
         question: 'Why should mobile networks work better now?',
         answer:
-            'The app uses one network baseline for Wi‑Fi and LTE: protected DNS, smoother reconnects, and stable tunnel routing.',
+            'The app uses one network baseline for Wi‑Fi and LTE: VPN server DNS, smoother reconnects, and stable tunnel routing.',
       ),
       _FaqItem(
         question: 'Is sending a report safe?',

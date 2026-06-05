@@ -99,15 +99,6 @@ class SingBoxConfigBuilder {
         'inet4_range': '198.18.0.0/15',
         'inet6_range': 'fc00::/18',
       },
-      {
-        'type': 'https',
-        'tag': 'global-dns',
-        'server': '1.1.1.1',
-        'server_port': 443,
-        'path': '/dns-query',
-        'tls': {'enabled': true, 'server_name': 'cloudflare-dns.com'},
-        'detour': 'proxy',
-      },
     ];
 
     final rules = <Map<String, dynamic>>[];
@@ -132,7 +123,7 @@ class SingBoxConfigBuilder {
       'strategy': 'ipv4_only',
       'cache_capacity': 8192,
       'reverse_mapping': true,
-      'final': 'global-dns',
+      'final': 'local-dns',
     };
   }
 
