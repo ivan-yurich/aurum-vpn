@@ -63,14 +63,14 @@ class ProfileImporter {
             viaLocalProxy: viaLocalProxy,
           );
           final body = fetched.body;
-          if (_looksLikeHtml(body)) {
-            lastError = ProfileImportException(
-              '${_fetchModeLabel(viaLocalProxy)}: сервер вернул HTML-страницу вместо подписки.',
-            );
-            continue;
-          }
           if (_canParsePayload(body)) {
             return fetched;
+          }
+          if (_looksLikeHtml(body)) {
+            lastError = ProfileImportException(
+              '${_fetchModeLabel(viaLocalProxy)}: сервер вернул HTML-страницу без поддерживаемых ключей.',
+            );
+            continue;
           }
           candidates.add(body);
         } on Object catch (error) {
@@ -933,7 +933,14 @@ class ProfileImporter {
   }
 
   String _cleanLink(String link) {
-    return link.replaceAll(RegExp(r'[)\],;]+$'), '');
+    return link
+        .replaceAll('&amp;', '&')
+        .replaceAll('&#38;', '&')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#34;', '"')
+        .replaceAll('&#39;', "'")
+        .replaceAll(r'\u0026', '&')
+        .replaceAll(RegExp(r'[)\],;]+$'), '');
   }
 
   String _displayName(String fragment, {required String fallback}) {

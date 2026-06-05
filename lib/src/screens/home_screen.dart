@@ -26,7 +26,7 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.30';
+const _appVersion = '1.0.31';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
@@ -1717,16 +1717,6 @@ class _HomeScreenState extends State<HomeScreen> {
               onToggle: _toggleVpn,
               toggleEnabled: !_busy && selected != null,
             ),
-            const SizedBox(height: 14),
-            FilledButton.icon(
-              onPressed: _busy || selected == null ? null : _toggleVpn,
-              icon: Icon(_connected ? Icons.power_settings_new : Icons.shield),
-              label: Text(_connected ? s.disconnect : s.connect),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(54),
-                textStyle: Theme.of(context).textTheme.titleMedium,
-              ),
-            ),
             const SizedBox(height: 16),
             _ProfilePanel(
               strings: s,
@@ -1742,6 +1732,7 @@ class _HomeScreenState extends State<HomeScreen> {
               displayName: _profileDisplayName,
               countryFlag: _profileCountryFlag,
               pingLabel: _profilePingLabel,
+              onPingAll: () => unawaited(_pingProfiles(_profiles)),
               onPing: (profile) => unawaited(_pingProfile(profile)),
             ),
             const SizedBox(height: 16),
@@ -1813,7 +1804,7 @@ class _StatusPanel extends StatelessWidget {
     };
 
     return SizedBox(
-      height: 176,
+      height: 212,
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: _surface,
@@ -1854,15 +1845,12 @@ class _StatusPanel extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(color: _mutedGold),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 16),
               Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Expanded(
                     child: _Metric(label: '↑', value: uplink, fixed: true),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: _Metric(label: '↓', value: downlink, fixed: true),
                   ),
                   const SizedBox(width: 14),
                   _UptimeButton(
@@ -1870,6 +1858,10 @@ class _StatusPanel extends StatelessWidget {
                     uptime: uptime,
                     enabled: toggleEnabled,
                     onPressed: onToggle,
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: _Metric(label: '↓', value: downlink, fixed: true),
                   ),
                 ],
               ),
@@ -1899,37 +1891,63 @@ class _UptimeButton extends StatelessWidget {
     return Tooltip(
       message: connected ? 'Время работы VPN' : 'Подключить',
       child: Material(
-        color: connected ? _gold : _surfaceMetric,
+        color: Colors.transparent,
         shape: const CircleBorder(),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: enabled ? onPressed : null,
-          child: SizedBox.square(
-            dimension: 72,
-            child: Padding(
-              padding: const EdgeInsets.all(8),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    connected ? Icons.timer_outlined : Icons.power_settings_new,
-                    color: connected ? _ink : _goldSoft,
-                    size: 18,
-                  ),
-                  const SizedBox(height: 3),
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      uptime,
-                      maxLines: 1,
-                      style: TextStyle(
-                        color: connected ? _ink : _goldSoft,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: RadialGradient(
+              colors: connected
+                  ? const [Color(0xFFFFD47A), _gold]
+                  : const [Color(0xFF3B2B12), _surfaceMetric],
+            ),
+            border: Border.all(
+              color: connected ? _goldSoft : _gold.withValues(alpha: 0.35),
+              width: 1.5,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: connected
+                    ? _gold.withValues(alpha: 0.34)
+                    : Colors.black38,
+                blurRadius: 22,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: enabled ? onPressed : null,
+            child: SizedBox.square(
+              dimension: 94,
+              child: Padding(
+                padding: const EdgeInsets.all(10),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      connected
+                          ? Icons.timer_outlined
+                          : Icons.power_settings_new,
+                      color: connected ? _ink : _goldSoft,
+                      size: 24,
+                    ),
+                    const SizedBox(height: 5),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        connected ? uptime : '00:00',
+                        maxLines: 1,
+                        style: TextStyle(
+                          color: connected ? _ink : _goldSoft,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 16,
+                          letterSpacing: 0,
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -1956,18 +1974,18 @@ class _Metric extends StatelessWidget {
     );
 
     return Container(
-      height: fixed ? 48 : null,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      height: fixed ? 52 : null,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: _surfaceMetric,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: _gold.withValues(alpha: 0.18)),
       ),
-      alignment: Alignment.centerLeft,
+      alignment: Alignment.center,
       child: fixed
           ? FittedBox(
               fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
+              alignment: Alignment.center,
               child: text,
             )
           : text,
@@ -1990,6 +2008,7 @@ class _ProfilePanel extends StatelessWidget {
     required this.displayName,
     required this.countryFlag,
     required this.pingLabel,
+    required this.onPingAll,
     required this.onPing,
   });
 
@@ -2006,6 +2025,7 @@ class _ProfilePanel extends StatelessWidget {
   final String Function(VpnProfile profile) displayName;
   final String? Function(VpnProfile profile) countryFlag;
   final String Function(VpnProfile profile) pingLabel;
+  final VoidCallback onPingAll;
   final ValueChanged<VpnProfile> onPing;
 
   @override
@@ -2020,6 +2040,11 @@ class _ProfilePanel extends StatelessWidget {
                 strings.profiles,
                 style: Theme.of(context).textTheme.titleMedium,
               ),
+            ),
+            IconButton(
+              tooltip: strings.refreshPing,
+              onPressed: profiles.isEmpty ? null : onPingAll,
+              icon: const Icon(Icons.refresh),
             ),
             IconButton(
               tooltip: strings.addProfile,
@@ -2611,6 +2636,7 @@ class _Strings {
     required this.disconnecting,
     required this.stopped,
     required this.profiles,
+    required this.refreshPing,
     required this.showQr,
     required this.copy,
     required this.delete,
@@ -2683,6 +2709,7 @@ class _Strings {
   final String disconnecting;
   final String stopped;
   final String profiles;
+  final String refreshPing;
   final String showQr;
   final String copy;
   final String delete;
@@ -2865,6 +2892,7 @@ class _Strings {
     disconnecting: 'Отключаюсь',
     stopped: 'Остановлено',
     profiles: 'Профили',
+    refreshPing: 'Обновить пинг',
     showQr: 'Показать QR',
     copy: 'Скопировать',
     delete: 'Удалить',
@@ -2976,6 +3004,7 @@ class _Strings {
     disconnecting: 'Disconnecting',
     stopped: 'Stopped',
     profiles: 'Profiles',
+    refreshPing: 'Refresh ping',
     showQr: 'Show QR',
     copy: 'Copy',
     delete: 'Delete',

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:aurum_vpn/src/models/vpn_profile.dart';
@@ -463,5 +464,62 @@ void main() {
     expect(profiles.first.kind, VpnProfileKind.vlessReality);
     expect(profiles.first.originalInput, startsWith('vless://'));
     expect(profiles.first.outbound?['tls']['reality']['public_key'], 'abc123');
+  });
+
+  test('imports HTML subscription page with embedded profile links', () async {
+    const html = '''
+<!doctype html>
+<html>
+  <body>
+    <a href="naive+https://user:pass@net-it.pro:443#naive">naive</a>
+    <a href="hy2://secret@net-it.pro:8443/?sni=net-it.pro&amp;obfs=salamander&amp;obfs-password=obfs-secret#ivan-hy2">hy2</a>
+    <a href="vless://11111111-1111-4111-8111-111111111111@net-it.pro:8444?security=reality&amp;type=tcp&amp;flow=xtls-rprx-vision&amp;sni=www.microsoft.com&amp;fp=chrome&amp;pbk=abc123&amp;sid=01#ivan-reality">reality</a>
+    <a href="vless://11111111-1111-4111-8111-111111111111@net-it.pro:8446?security=none&amp;type=mkcp#ivan-mkcp">mkcp</a>
+    <a href="vless://11111111-1111-4111-8111-111111111111@net-it.pro:8447?security=tls&amp;type=grpc&amp;serviceName=vless-grpc&amp;sni=net-it.pro&amp;fp=chrome#ivan-grpc">grpc</a>
+  </body>
+</html>
+''';
+
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((request) {
+      request.response
+        ..statusCode = HttpStatus.ok
+        ..headers.contentType = ContentType.html
+        ..write(html)
+        ..close();
+    });
+
+    try {
+      final profiles = await ProfileImporter().importFromText(
+        'http://${server.address.address}:${server.port}/s/token/',
+      );
+
+      expect(profiles.map((profile) => profile.name), contains('naive'));
+      expect(profiles.map((profile) => profile.name), contains('ivan-hy2'));
+      expect(profiles.map((profile) => profile.name), contains('ivan-reality'));
+      expect(profiles.map((profile) => profile.name), contains('ivan-grpc'));
+      expect(
+        profiles.map((profile) => profile.name),
+        isNot(contains('ivan-mkcp')),
+      );
+
+      final hysteria = profiles.firstWhere(
+        (profile) => profile.kind == VpnProfileKind.hysteria2,
+      );
+      expect(hysteria.outbound?['obfs'], {
+        'type': 'salamander',
+        'password': 'obfs-secret',
+      });
+
+      final grpc = profiles.firstWhere(
+        (profile) => profile.name == 'ivan-grpc',
+      );
+      expect(grpc.outbound?['transport'], {
+        'type': 'grpc',
+        'service_name': 'vless-grpc',
+      });
+    } finally {
+      await server.close(force: true);
+    }
   });
 }
