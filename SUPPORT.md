@@ -1,6 +1,6 @@
 # Support
 
-For Aurum VPN support, use one of these channels:
+For Yurich Connect support, use one of these channels:
 
 - Email: [ai@ivan-it.net](mailto:ai@ivan-it.net)
 - Site: [ivan-it.net](https://ivan-it.net)

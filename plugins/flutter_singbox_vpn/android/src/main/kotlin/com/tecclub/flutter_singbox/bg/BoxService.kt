@@ -112,7 +112,7 @@ class BoxService(
                 return
             }
 
-            lastProfileName = "Aurum VPN"
+            lastProfileName = "Yurich Connect"
             // withContext(Dispatchers.Main) {
             //     android.util.Log.e("BoxService", "Updating notification with profile name")
             //     // notification.show(lastProfileName, "Starting...")
@@ -330,7 +330,7 @@ class BoxService(
         // CRITICAL: Call startForeground IMMEDIATELY to prevent Android from killing the app
         // This must happen synchronously before any async work
         android.util.Log.e("BoxService", "Starting foreground notification immediately")
-        notification.show("Aurum VPN", "Подключение...")
+        notification.show("Yurich Connect", "Подключение...")
         
         if (status.value != Status.Stopped) {
             android.util.Log.e("BoxService", "Service already running, not restarting")

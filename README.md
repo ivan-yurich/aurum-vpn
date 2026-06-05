@@ -1,6 +1,6 @@
-# Aurum VPN Android
+# Yurich Connect Android
 
-Aurum VPN is a gold/dark Android VPN client powered by sing-box. It focuses on
+Yurich Connect is a gold/dark Android VPN client powered by sing-box. It focuses on
 simple profile import, stable reconnects, protected DNS, and clear diagnostics
 for VLESS Reality, VLESS TLS, NaiveProxy, Remnawave subscriptions, and sing-box
 JSON profiles.
@@ -11,7 +11,7 @@ JSON profiles.
 
 Use the GitHub Release asset:
 
-- `AurumVPN-android-release.apk`
+- `YurichConnect-android-release.apk`
 
 Android may warn about APKs installed outside Google Play until the app is
 published and verified by Play Protect.
@@ -61,7 +61,7 @@ build/app/outputs/apk/release/app-release.apk
 
 ## Русский
 
-Aurum VPN Android — Android-клиент VPN в золотом стиле на базе sing-box. Он
+Yurich Connect Android — Android-клиент VPN в золотом стиле на базе sing-box. Он
 умеет импортировать профили из Remnawave, `vless://`, `naive+https://`, QR,
 буфера и sing-box JSON.
 

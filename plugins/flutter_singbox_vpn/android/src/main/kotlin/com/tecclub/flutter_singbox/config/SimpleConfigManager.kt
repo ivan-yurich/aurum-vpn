@@ -13,7 +13,7 @@ object SimpleConfigManager {
     private const val KEY_NOTIFICATION_TITLE = "notification_title"
     private const val KEY_NOTIFICATION_DESCRIPTION = "notification_description"
     private const val DEFAULT_CONFIG = "{}"
-    private const val DEFAULT_NOTIFICATION_TITLE = "Aurum VPN"
+    private const val DEFAULT_NOTIFICATION_TITLE = "Yurich Connect"
     private const val DEFAULT_NOTIFICATION_DESCRIPTION = "VPN подключение активно"
     
     // Initialize the config manager with context

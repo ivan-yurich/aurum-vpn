@@ -43,7 +43,7 @@ class MainActivity : FlutterActivity() {
             !packageManager.canRequestPackageInstalls()
         ) {
             openInstallSettings()
-            result.error("INSTALL_PERMISSION", "Allow APK installation from Aurum VPN", null)
+            result.error("INSTALL_PERMISSION", "Allow APK installation from Yurich Connect", null)
             return
         }
 
@@ -98,7 +98,7 @@ class MainActivity : FlutterActivity() {
     private fun buildInstallIntent(action: String, uri: Uri): Intent =
         Intent(action).apply {
             setDataAndType(uri, APK_MIME_TYPE)
-            clipData = ClipData.newUri(contentResolver, "Aurum VPN update", uri)
+            clipData = ClipData.newUri(contentResolver, "Yurich Connect update", uri)
             putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
             putExtra(Intent.EXTRA_RETURN_RESULT, true)
             putExtra(Intent.EXTRA_INSTALLER_PACKAGE_NAME, packageName)
@@ -111,7 +111,7 @@ class MainActivity : FlutterActivity() {
 
     private fun prepareInstallFile(source: File): File {
         val safeName = source.name
-            .ifBlank { "AurumVPN-update.apk" }
+            .ifBlank { "YurichConnect-update.apk" }
             .replace(Regex("[^A-Za-z0-9._-]"), "_")
             .let { if (it.endsWith(".apk", ignoreCase = true)) it else "$it.apk" }
         val updatesDir = File(cacheDir, "updates").apply { mkdirs() }

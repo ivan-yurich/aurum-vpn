@@ -669,7 +669,7 @@ class FlutterSingboxPlugin :
                 clearLogBuffer(result)
             }
             "setNotificationTitle" -> {
-                val title = call.argument<String>("title") ?: "Aurum VPN"
+                val title = call.argument<String>("title") ?: "Yurich Connect"
                 setNotificationTitle(title, result)
             }
             "setNotificationDescription" -> {

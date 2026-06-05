@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.32 - 2026-06-05
+
+- Renamed the Android app brand from Aurum VPN to Yurich Connect across the
+  launcher label, Flutter title, notification title, updater messages, and
+  support docs.
+- Kept the Android package/application id unchanged so existing installs can
+  update in place.
+
 ## 1.0.27 - 2026-06-01
 
 - Improved Android APK handoff for in-app updates on OEM firmware by copying

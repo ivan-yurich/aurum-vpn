@@ -21,12 +21,12 @@ const _ink = Color(0xFF0E0B07);
 const _surface = Color(0xFF18130B);
 const _surfaceMetric = Color(0xFF2D2110);
 const _mutedGold = Color(0xFFB9AA86);
-const _appName = 'Aurum VPN';
+const _appName = 'Yurich Connect';
 const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.31';
+const _appVersion = '1.0.32';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
@@ -971,7 +971,7 @@ class _HomeScreenState extends State<HomeScreen> {
               .timeout(const Duration(seconds: 5));
           request.headers.set(
             HttpHeaders.userAgentHeader,
-            'AurumVPN/$_appVersion',
+            'YurichConnect/$_appVersion',
           );
           request.followRedirects = false;
           final response = await request.close().timeout(
@@ -2874,7 +2874,7 @@ class _Strings {
     working: 'Работаю...',
     report: 'Отчёт',
     cannotOpenLink: 'Не смог открыть ссылку.',
-    mailSubject: 'Aurum VPN: диагностика VPN',
+    mailSubject: 'Yurich Connect: диагностика VPN',
     mailFallback: 'Почта не открылась. Отчёт скопирован в буфер.',
     vpnStoppedUnexpectedly: 'VPN остановлен неожиданно',
     openLogsMessage: 'VPN остановлен. Открой логи sing-box.',
@@ -2928,7 +2928,7 @@ class _Strings {
     updateChecking: 'Проверяю обновления...',
     updateInstallerOpened: 'Установщик Android открыт',
     updateInstallPermission:
-        'Разреши установку приложений из Aurum VPN и нажми кнопку ещё раз.',
+        'Разреши установку приложений из Yurich Connect и нажми кнопку ещё раз.',
     openSettings: 'Настройки',
     faq: 'FAQ',
     faqItems: [
@@ -2986,7 +2986,7 @@ class _Strings {
     working: 'Working...',
     report: 'Report',
     cannotOpenLink: 'Could not open the link.',
-    mailSubject: 'Aurum VPN: VPN diagnostics',
+    mailSubject: 'Yurich Connect: VPN diagnostics',
     mailFallback: 'Mail did not open. Report copied to clipboard.',
     vpnStoppedUnexpectedly: 'VPN stopped unexpectedly',
     openLogsMessage: 'VPN stopped. Open sing-box logs.',
@@ -3039,7 +3039,7 @@ class _Strings {
     updateChecking: 'Checking updates...',
     updateInstallerOpened: 'Android installer opened',
     updateInstallPermission:
-        'Allow app installs from Aurum VPN, then press the button again.',
+        'Allow app installs from Yurich Connect, then press the button again.',
     openSettings: 'Settings',
     faq: 'FAQ',
     faqItems: [

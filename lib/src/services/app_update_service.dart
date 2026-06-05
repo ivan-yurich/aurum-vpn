@@ -80,12 +80,12 @@ class AppUpdateService {
     AppUpdateInfo update, {
     required void Function(double? progress) onProgress,
   }) async {
-    final tempDir = await Directory.systemTemp.createTemp('aurum_update_');
+    final tempDir = await Directory.systemTemp.createTemp('yurich_connect_');
     final file = File(
       '${tempDir.path}${Platform.pathSeparator}${update.assetName}',
     );
     final request = await _client.getUrl(update.downloadUrl);
-    request.headers.set(HttpHeaders.userAgentHeader, 'AurumVPN-Updater');
+    request.headers.set(HttpHeaders.userAgentHeader, 'YurichConnect-Updater');
     request.followRedirects = true;
     final response = await request.close().timeout(const Duration(seconds: 15));
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -137,7 +137,7 @@ class AppUpdateService {
   ) async {
     final request = await _client.getUrl(uri);
     request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-    request.headers.set(HttpHeaders.userAgentHeader, 'AurumVPN-Updater');
+    request.headers.set(HttpHeaders.userAgentHeader, 'YurichConnect-Updater');
     final response = await request.close().timeout(const Duration(seconds: 12));
     if (response.statusCode == HttpStatus.notFound) {
       return null;
@@ -172,7 +172,7 @@ class AppUpdateService {
 
     return AppUpdateInfo(
       version: _normalizeVersion(version),
-      assetName: selected['name']?.toString() ?? 'AurumVPN-update.apk',
+      assetName: selected['name']?.toString() ?? 'YurichConnect-update.apk',
       downloadUrl: Uri.parse(downloadUrl),
       size: selected['size'] is int ? selected['size'] as int : null,
     );
