@@ -26,12 +26,14 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.32';
+const _appVersion = '1.0.33';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
-const _tunnelHealthProbeInterval = Duration(seconds: 65);
-const _tunnelHealthFailureThreshold = 2;
+const _tunnelHealthProbeInterval = Duration(seconds: 105);
+const _recentTrafficGrace = Duration(seconds: 120);
+const _tunnelHealthFailureThreshold = 4;
+const _autoReconnectMaxAttempts = 6;
 const _maxStoredLogs = 180;
 const _maxPendingLogs = 240;
 
@@ -58,6 +60,23 @@ enum _AppLanguage {
   }
 }
 
+enum _ProfileTab { all, vless, naive, hysteria, singBox }
+
+enum _SupportTab { help, community }
+
+_ProfileTab _profileTabForKind(VpnProfileKind kind) {
+  return switch (kind) {
+    VpnProfileKind.vlessReality || VpnProfileKind.vlessTls => _ProfileTab.vless,
+    VpnProfileKind.naive => _ProfileTab.naive,
+    VpnProfileKind.hysteria2 || VpnProfileKind.hysteria => _ProfileTab.hysteria,
+    VpnProfileKind.singBoxConfig => _ProfileTab.singBox,
+  };
+}
+
+bool _profileMatchesTab(VpnProfile profile, _ProfileTab tab) {
+  return tab == _ProfileTab.all || _profileTabForKind(profile.kind) == tab;
+}
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -82,6 +101,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Timer? _uptimeTimer;
   DateTime? _ignoreStoppedUntil;
   DateTime? _connectedSince;
+  DateTime? _lastTrafficAt;
+  DateTime? _lastHealthyAt;
   DateTime _clockNow = DateTime.now();
   Map<String, dynamic>? _latestTrafficEvent;
 
@@ -91,6 +112,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final _profilePingError = <String, String>{};
   String? _selectedProfileId;
   _AppLanguage _language = _AppLanguage.ru;
+  _ProfileTab _profileTab = _ProfileTab.all;
+  _SupportTab _supportTab = _SupportTab.help;
   String _status = AurumVpnStatus.stopped;
   String _uplink = '0 B/s';
   String _downlink = '0 B/s';
@@ -113,6 +136,7 @@ class _HomeScreenState extends State<HomeScreen> {
   DateTime? _nextTunnelHealthCheckAt;
   int _autoReconnectAttempts = 0;
   int _tunnelHealthFailures = 0;
+  int _lastSessionTrafficBytes = 0;
   final _logs = <String>[];
   final _pendingLogs = <String>[];
 
@@ -206,6 +230,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       final status = event['status'] as String?;
       if (status != null && mounted) {
+        final now = DateTime.now();
         var recoverUnexpectedStop = false;
         setState(() {
           _status = status;
@@ -214,18 +239,19 @@ class _HomeScreenState extends State<HomeScreen> {
             _autoReconnectAttempts = 0;
             _nextAutoReconnectAt = null;
             _autoRecoveryArmed = true;
-            _connectedSince ??= DateTime.now();
-            _clockNow = DateTime.now();
-            _ignoreStoppedUntil = DateTime.now().add(
-              const Duration(seconds: 4),
-            );
+            _connectedSince ??= now;
+            _lastHealthyAt = now;
+            _lastTrafficAt ??= now;
+            _clockNow = now;
+            _ignoreStoppedUntil = now.add(const Duration(seconds: 4));
           }
           if (status == AurumVpnStatus.stopped && !_autoRecoveryArmed) {
             _connectedSince = null;
+            _lastTrafficAt = null;
+            _lastHealthyAt = null;
           }
           final ignoreStopped =
-              _ignoreStoppedUntil != null &&
-              DateTime.now().isBefore(_ignoreStoppedUntil!);
+              _ignoreStoppedUntil != null && now.isBefore(_ignoreStoppedUntil!);
           if (status == AurumVpnStatus.stopped &&
               _autoRecoveryArmed &&
               !_stoppingByUser &&
@@ -251,11 +277,27 @@ class _HomeScreenState extends State<HomeScreen> {
         if (!mounted || latest == null) {
           return;
         }
+        final uplinkSpeed = _eventInt(latest['uplinkSpeed']);
+        final downlinkSpeed = _eventInt(latest['downlinkSpeed']);
+        final sessionTotal = _eventInt(latest['sessionTotal']);
+        final hasTraffic =
+            uplinkSpeed > 0 ||
+            downlinkSpeed > 0 ||
+            sessionTotal > _lastSessionTrafficBytes;
+        final now = DateTime.now();
         setState(() {
           _uplink = latest['formattedUplinkSpeed'] as String? ?? _uplink;
           _downlink = latest['formattedDownlinkSpeed'] as String? ?? _downlink;
           _sessionTotal =
               latest['formattedSessionTotal'] as String? ?? _sessionTotal;
+          if (sessionTotal >= _lastSessionTrafficBytes) {
+            _lastSessionTrafficBytes = sessionTotal;
+          }
+          if (hasTraffic && _status == AurumVpnStatus.started) {
+            _lastTrafficAt = now;
+            _lastHealthyAt = now;
+            _tunnelHealthFailures = 0;
+          }
         });
       });
     });
@@ -446,6 +488,7 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() {
         _profiles = merged;
         _selectedProfileId = imported.first.id;
+        _profileTab = _profileTabForKind(imported.first.kind);
         _message = s.imported(imported.length);
       });
       unawaited(_pingProfiles(merged));
@@ -517,6 +560,10 @@ class _HomeScreenState extends State<HomeScreen> {
     _pendingLogs.clear();
     _logs.clear();
     _lastError = null;
+    _lastTrafficAt = null;
+    _lastHealthyAt = null;
+    _lastSessionTrafficBytes = 0;
+    _tunnelHealthFailures = 0;
     await _bestEffortNative('clearLogs', _vpnEngine.clearLogs());
 
     await _bestEffortNative(
@@ -635,6 +682,9 @@ class _HomeScreenState extends State<HomeScreen> {
         _autoRecoveryArmed = true;
         _connectedSince ??= DateTime.now();
         _clockNow = DateTime.now();
+        _lastTrafficAt = DateTime.now();
+        _lastHealthyAt = DateTime.now();
+        _lastSessionTrafficBytes = 0;
         _nextTunnelHealthCheckAt = DateTime.now().add(
           _tunnelHealthProbeInterval,
         );
@@ -682,6 +732,10 @@ class _HomeScreenState extends State<HomeScreen> {
           if (updateMessage) {
             _autoRecoveryArmed = false;
             _connectedSince = null;
+            _lastTrafficAt = null;
+            _lastHealthyAt = null;
+            _lastSessionTrafficBytes = 0;
+            _tunnelHealthFailures = 0;
           }
           _lastError = null;
           if (updateMessage) {
@@ -788,6 +842,15 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    final lastTrafficAt = _lastTrafficAt;
+    if (lastTrafficAt != null &&
+        now.difference(lastTrafficAt) < _recentTrafficGrace) {
+      _tunnelHealthFailures = 0;
+      _lastHealthyAt = lastTrafficAt;
+      _nextTunnelHealthCheckAt = now.add(_tunnelHealthProbeInterval);
+      return;
+    }
+
     _nextTunnelHealthCheckAt = now.add(_tunnelHealthProbeInterval);
     _tunnelHealthCheckInFlight = true;
     try {
@@ -801,6 +864,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (healthy) {
         _tunnelHealthFailures = 0;
+        _lastHealthyAt = DateTime.now();
         return;
       }
 
@@ -848,6 +912,19 @@ class _HomeScreenState extends State<HomeScreen> {
     final now = DateTime.now();
     final nextAttemptAt = _nextAutoReconnectAt;
     if (nextAttemptAt != null && now.isBefore(nextAttemptAt)) {
+      return;
+    }
+
+    if (_autoReconnectAttempts >= _autoReconnectMaxAttempts) {
+      _nextAutoReconnectAt = now.add(const Duration(minutes: 5));
+      _queueLog(
+        'VPN watchdog: auto reconnect paused for mobile network cooldown.',
+      );
+      if (mounted) {
+        setState(() {
+          _message = s.networkRecoveryPaused(profile.name);
+        });
+      }
       return;
     }
 
@@ -1198,25 +1275,43 @@ class _HomeScreenState extends State<HomeScreen> {
     };
   }
 
-  Future<void> _deleteSelected() async {
-    final selected = _selectedProfile;
-    if (selected == null) {
+  Future<void> _deleteProfile(VpnProfile profile) async {
+    if (_busy) {
       return;
     }
 
-    final next = _profiles
-        .where((profile) => profile.id != selected.id)
-        .toList();
-    await _store.saveProfiles(next);
-    await _store.saveSelectedProfileId(next.isEmpty ? null : next.first.id);
-    if (!mounted) {
-      return;
-    }
-    setState(() {
-      _profiles = next;
-      _selectedProfileId = next.isEmpty ? null : next.first.id;
-      _message = s.profileDeleted;
-    });
+    await _runBusy(() async {
+      final wasSelected = _selectedProfileId == profile.id;
+      if (wasSelected && _connected) {
+        _autoRecoveryArmed = false;
+        await _stopVpnCore(updateMessage: true);
+      }
+
+      final next = _profiles
+          .where((item) => item.id != profile.id)
+          .toList(growable: false);
+      final nextSelectedId = wasSelected
+          ? (next.isEmpty ? null : next.first.id)
+          : _selectedProfileId;
+
+      await _store.saveProfiles(next);
+      await _store.saveSelectedProfileId(nextSelectedId);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _profiles = next;
+        _selectedProfileId = nextSelectedId;
+        _profilePingMs.remove(profile.id);
+        _profilePingBusy.remove(profile.id);
+        _profilePingError.remove(profile.id);
+        if (next.isEmpty ||
+            !next.any((item) => _profileMatchesTab(item, _profileTab))) {
+          _profileTab = _ProfileTab.all;
+        }
+        _message = s.profileDeleted;
+      });
+    }, message: s.working);
   }
 
   Future<void> _copySelected() async {
@@ -1271,6 +1366,15 @@ class _HomeScreenState extends State<HomeScreen> {
       _queueLog(message);
       throw TimeoutException(message, timeout);
     }
+  }
+
+  int _eventInt(Object? value) {
+    return switch (value) {
+      int() => value,
+      num() => value.round(),
+      String() => int.tryParse(value) ?? 0,
+      _ => 0,
+    };
   }
 
   Future<void> _bestEffortNative<T>(
@@ -1446,6 +1550,10 @@ class _HomeScreenState extends State<HomeScreen> {
       'auto_recovery_armed: $_autoRecoveryArmed',
       'auto_reconnect_attempts: $_autoReconnectAttempts',
       'health_failures: $_tunnelHealthFailures',
+      if (_lastTrafficAt != null)
+        'last_traffic_local: ${_lastTrafficAt!.toIso8601String()}',
+      if (_lastHealthyAt != null)
+        'last_healthy_local: ${_lastHealthyAt!.toIso8601String()}',
       if (profile != null) ...[
         'profile: ${_redactSensitive(profile.name)}',
         'protocol: ${_profileKindLabel(profile.kind)}',
@@ -1723,11 +1831,13 @@ class _HomeScreenState extends State<HomeScreen> {
               profiles: _profiles,
               selectedProfile: selected,
               selectedId: selected?.id,
+              selectedTab: _profileTab,
+              onTabChanged: (tab) => setState(() => _profileTab = tab),
               onSelect: _selectProfile,
               onAdd: _showImportSheet,
               onCopy: selected == null ? null : _copySelected,
               onQr: selected == null ? null : _showQr,
-              onDelete: selected == null ? null : _deleteSelected,
+              onDeleteProfile: (profile) => unawaited(_deleteProfile(profile)),
               kindLabel: _profileKindLabel,
               displayName: _profileDisplayName,
               countryFlag: _profileCountryFlag,
@@ -1738,6 +1848,8 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 16),
             _SupportPanel(
               strings: s,
+              selectedTab: _supportTab,
+              onTabChanged: (tab) => setState(() => _supportTab = tab),
               language: _language,
               onLanguageChanged: (language) =>
                   unawaited(_setLanguage(language)),
@@ -1898,20 +2010,26 @@ class _UptimeButton extends StatelessWidget {
             shape: BoxShape.circle,
             gradient: RadialGradient(
               colors: connected
-                  ? const [Color(0xFFFFD47A), _gold]
+                  ? const [
+                      Color(0xFFFFF2BC),
+                      Color(0xFFFFC857),
+                      Color(0xFFE09B12),
+                    ]
                   : const [Color(0xFF3B2B12), _surfaceMetric],
             ),
             border: Border.all(
-              color: connected ? _goldSoft : _gold.withValues(alpha: 0.35),
-              width: 1.5,
+              color: connected
+                  ? const Color(0xFFFFF0B0)
+                  : _gold.withValues(alpha: 0.35),
+              width: connected ? 2.2 : 1.5,
             ),
             boxShadow: [
               BoxShadow(
                 color: connected
-                    ? _gold.withValues(alpha: 0.34)
+                    ? const Color(0xFFFFB703).withValues(alpha: 0.62)
                     : Colors.black38,
-                blurRadius: 22,
-                offset: const Offset(0, 10),
+                blurRadius: connected ? 34 : 22,
+                offset: const Offset(0, 12),
               ),
             ],
           ),
@@ -1999,11 +2117,13 @@ class _ProfilePanel extends StatelessWidget {
     required this.profiles,
     required this.selectedProfile,
     required this.selectedId,
+    required this.selectedTab,
+    required this.onTabChanged,
     required this.onSelect,
     required this.onAdd,
     required this.onCopy,
     required this.onQr,
-    required this.onDelete,
+    required this.onDeleteProfile,
     required this.kindLabel,
     required this.displayName,
     required this.countryFlag,
@@ -2016,11 +2136,13 @@ class _ProfilePanel extends StatelessWidget {
   final List<VpnProfile> profiles;
   final VpnProfile? selectedProfile;
   final String? selectedId;
+  final _ProfileTab selectedTab;
+  final ValueChanged<_ProfileTab> onTabChanged;
   final ValueChanged<VpnProfile> onSelect;
   final VoidCallback onAdd;
   final VoidCallback? onCopy;
   final VoidCallback? onQr;
-  final VoidCallback? onDelete;
+  final ValueChanged<VpnProfile> onDeleteProfile;
   final String Function(VpnProfileKind kind) kindLabel;
   final String Function(VpnProfile profile) displayName;
   final String? Function(VpnProfile profile) countryFlag;
@@ -2030,6 +2152,10 @@ class _ProfilePanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final visibleProfiles = profiles
+        .where((profile) => _profileMatchesTab(profile, selectedTab))
+        .toList(growable: false);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2061,18 +2187,22 @@ class _ProfilePanel extends StatelessWidget {
               onPressed: onCopy,
               icon: const Icon(Icons.copy),
             ),
-            IconButton(
-              tooltip: strings.delete,
-              onPressed: onDelete,
-              icon: const Icon(Icons.delete_outline),
-            ),
           ],
         ),
         const SizedBox(height: 8),
+        _ProfileTabBar(
+          strings: strings,
+          profiles: profiles,
+          selectedTab: selectedTab,
+          onChanged: onTabChanged,
+        ),
+        const SizedBox(height: 10),
         if (profiles.isEmpty)
           _EmptyProfiles(strings: strings)
+        else if (visibleProfiles.isEmpty)
+          _EmptyProfiles(message: strings.noProfilesInTab(selectedTab))
         else
-          ...profiles.map(
+          ...visibleProfiles.map(
             (profile) => Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: _ProfileTile(
@@ -2084,6 +2214,8 @@ class _ProfilePanel extends StatelessWidget {
                 countryFlag: countryFlag(profile),
                 pingLabel: pingLabel(profile),
                 onPing: () => onPing(profile),
+                onDelete: () => onDeleteProfile(profile),
+                deleteTooltip: strings.delete,
               ),
             ),
           ),
@@ -2107,6 +2239,62 @@ class _ProfilePanel extends StatelessWidget {
   }
 }
 
+class _ProfileTabBar extends StatelessWidget {
+  const _ProfileTabBar({
+    required this.strings,
+    required this.profiles,
+    required this.selectedTab,
+    required this.onChanged,
+  });
+
+  final _Strings strings;
+  final List<VpnProfile> profiles;
+  final _ProfileTab selectedTab;
+  final ValueChanged<_ProfileTab> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          for (final tab in _ProfileTab.values) ...[
+            ChoiceChip(
+              label: Text(strings.profileTabLabel(tab, _countFor(tab))),
+              selected: selectedTab == tab,
+              showCheckmark: false,
+              onSelected: (_) => onChanged(tab),
+              selectedColor: _gold.withValues(alpha: 0.9),
+              backgroundColor: _surface,
+              labelStyle: TextStyle(
+                color: selectedTab == tab ? _ink : _goldSoft,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+                side: BorderSide(
+                  color: selectedTab == tab
+                      ? _goldSoft
+                      : _gold.withValues(alpha: 0.2),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
+        ],
+      ),
+    );
+  }
+
+  int _countFor(_ProfileTab tab) {
+    if (tab == _ProfileTab.all) {
+      return profiles.length;
+    }
+    return profiles.where((profile) => _profileMatchesTab(profile, tab)).length;
+  }
+}
+
 class _ProfileTile extends StatelessWidget {
   const _ProfileTile({
     required this.profile,
@@ -2117,6 +2305,8 @@ class _ProfileTile extends StatelessWidget {
     required this.countryFlag,
     required this.pingLabel,
     required this.onPing,
+    required this.onDelete,
+    required this.deleteTooltip,
   });
 
   final VpnProfile profile;
@@ -2127,6 +2317,8 @@ class _ProfileTile extends StatelessWidget {
   final String? countryFlag;
   final String pingLabel;
   final VoidCallback onPing;
+  final VoidCallback onDelete;
+  final String deleteTooltip;
 
   @override
   Widget build(BuildContext context) {
@@ -2203,6 +2395,15 @@ class _ProfileTile extends StatelessWidget {
                 ),
               ),
             ),
+            const SizedBox(width: 4),
+            IconButton(
+              tooltip: deleteTooltip,
+              onPressed: onDelete,
+              icon: const Icon(Icons.delete_outline),
+              color: selected ? _goldSoft : _mutedGold,
+              iconSize: 20,
+              visualDensity: VisualDensity.compact,
+            ),
           ],
         ),
       ),
@@ -2211,9 +2412,10 @@ class _ProfileTile extends StatelessWidget {
 }
 
 class _EmptyProfiles extends StatelessWidget {
-  const _EmptyProfiles({required this.strings});
+  const _EmptyProfiles({this.strings, this.message});
 
-  final _Strings strings;
+  final _Strings? strings;
+  final String? message;
 
   @override
   Widget build(BuildContext context) {
@@ -2225,7 +2427,7 @@ class _EmptyProfiles extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Colors.white12),
       ),
-      child: Text(strings.emptyProfiles),
+      child: Text(message ?? strings!.emptyProfiles),
     );
   }
 }
@@ -2335,6 +2537,8 @@ class _ProfileInsightPanel extends StatelessWidget {
 class _SupportPanel extends StatelessWidget {
   const _SupportPanel({
     required this.strings,
+    required this.selectedTab,
+    required this.onTabChanged,
     required this.language,
     required this.onLanguageChanged,
     required this.onSupport,
@@ -2345,6 +2549,8 @@ class _SupportPanel extends StatelessWidget {
   });
 
   final _Strings strings;
+  final _SupportTab selectedTab;
+  final ValueChanged<_SupportTab> onTabChanged;
   final _AppLanguage language;
   final ValueChanged<_AppLanguage> onLanguageChanged;
   final VoidCallback onSupport;
@@ -2358,38 +2564,74 @@ class _SupportPanel extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(strings.contact, style: Theme.of(context).textTheme.titleMedium),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                strings.contact,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            SegmentedButton<_SupportTab>(
+              segments: [
+                ButtonSegment(
+                  value: _SupportTab.help,
+                  label: Text(strings.supportTabLabel(_SupportTab.help)),
+                ),
+                ButtonSegment(
+                  value: _SupportTab.community,
+                  label: Text(strings.supportTabLabel(_SupportTab.community)),
+                ),
+              ],
+              selected: {selectedTab},
+              showSelectedIcon: false,
+              onSelectionChanged: (value) {
+                final selected = value.isEmpty ? null : value.first;
+                if (selected != null) {
+                  onTabChanged(selected);
+                }
+              },
+              style: ButtonStyle(
+                visualDensity: VisualDensity.compact,
+                minimumSize: WidgetStateProperty.all(const Size(72, 36)),
+              ),
+            ),
+          ],
+        ),
         const SizedBox(height: 10),
         Wrap(
           spacing: 10,
           runSpacing: 10,
-          children: [
-            OutlinedButton.icon(
-              onPressed: onSupport,
-              icon: const Icon(Icons.support_agent),
-              label: Text(strings.support),
-            ),
-            OutlinedButton.icon(
-              onPressed: onTelegram,
-              icon: const Icon(Icons.forum_outlined),
-              label: const Text('Telegram'),
-            ),
-            OutlinedButton.icon(
-              onPressed: onVk,
-              icon: const Icon(Icons.groups_outlined),
-              label: const Text('VK'),
-            ),
-            OutlinedButton.icon(
-              onPressed: onDonate,
-              icon: const Icon(Icons.volunteer_activism_outlined),
-              label: Text(strings.donate),
-            ),
-            OutlinedButton.icon(
-              onPressed: onDeveloper,
-              icon: const Icon(Icons.mail_outline),
-              label: Text(strings.developer),
-            ),
-          ],
+          children: selectedTab == _SupportTab.help
+              ? [
+                  OutlinedButton.icon(
+                    onPressed: onSupport,
+                    icon: const Icon(Icons.support_agent),
+                    label: Text(strings.support),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: onDeveloper,
+                    icon: const Icon(Icons.mail_outline),
+                    label: Text(strings.developer),
+                  ),
+                ]
+              : [
+                  OutlinedButton.icon(
+                    onPressed: onTelegram,
+                    icon: const Icon(Icons.forum_outlined),
+                    label: const Text('Telegram'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: onVk,
+                    icon: const Icon(Icons.groups_outlined),
+                    label: const Text('VK'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: onDonate,
+                    icon: const Icon(Icons.volunteer_activism_outlined),
+                    label: Text(strings.donate),
+                  ),
+                ],
         ),
         const SizedBox(height: 12),
         Row(
@@ -2770,6 +3012,36 @@ class _Strings {
     _ => 'Импортировано профилей: $count',
   };
 
+  String profileTabLabel(_ProfileTab tab, int count) {
+    final label = switch (tab) {
+      _ProfileTab.all => switch (this) {
+        _Strings.en => 'All',
+        _ => 'Все',
+      },
+      _ProfileTab.vless => 'VLESS',
+      _ProfileTab.naive => 'Naive',
+      _ProfileTab.hysteria => 'Hysteria',
+      _ProfileTab.singBox => 'JSON',
+    };
+    return '$label $count';
+  }
+
+  String noProfilesInTab(_ProfileTab tab) => switch (this) {
+    _Strings.en => 'No profiles in this tab yet.',
+    _ => 'В этой вкладке пока нет профилей.',
+  };
+
+  String supportTabLabel(_SupportTab tab) => switch (tab) {
+    _SupportTab.help => switch (this) {
+      _Strings.en => 'Help',
+      _ => 'Помощь',
+    },
+    _SupportTab.community => switch (this) {
+      _Strings.en => 'Project',
+      _ => 'Проект',
+    },
+  };
+
   String selectedProfile(String name) => switch (this) {
     _Strings.en => 'Selected profile: $name',
     _ => 'Выбран профиль: $name',
@@ -2788,6 +3060,12 @@ class _Strings {
   String connectionProfile(String name) => switch (this) {
     _Strings.en => 'Connection: $name',
     _ => 'Подключение: $name',
+  };
+
+  String networkRecoveryPaused(String name) => switch (this) {
+    _Strings.en =>
+      'Mobile network is unstable. Auto reconnect is paused for $name.',
+    _ => 'Мобильная сеть нестабильна. Автовосстановление для $name на паузе.',
   };
 
   String vpnNotConnected(String status) => switch (this) {

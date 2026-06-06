@@ -107,7 +107,7 @@ void main() {
       (inbound) => inbound['type'] == 'tun',
     );
     expect(tunInbound['address'], ['172.19.0.1/30']);
-    expect(tunInbound['mtu'], 9000);
+    expect(tunInbound['mtu'], 1380);
     expect(tunInbound['interface_name'], 'tun0');
     expect(tunInbound['strict_route'], isTrue);
     expect(tunInbound['stack'], 'gvisor');
