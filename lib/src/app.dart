@@ -8,7 +8,7 @@ class YurichConnectApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = ColorScheme.fromSeed(
-      seedColor: const Color(0xFFD9A441),
+      seedColor: const Color(0xFF0EA5FF),
       brightness: Brightness.dark,
     );
 
@@ -17,29 +17,29 @@ class YurichConnectApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: colorScheme,
-        scaffoldBackgroundColor: const Color(0xFF0E0B07),
+        scaffoldBackgroundColor: const Color(0xFF06111C),
         useMaterial3: true,
         appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF0E0B07),
-          foregroundColor: Color(0xFFFFE6A3),
+          backgroundColor: Color(0xFF06111C),
+          foregroundColor: Color(0xFFEAF7FF),
           elevation: 0,
         ),
         cardTheme: CardThemeData(
-          color: const Color(0xFF18130B),
+          color: const Color(0xFF0D1A27),
           elevation: 0,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
-          fillColor: const Color(0xFF21180C),
-          hintStyle: const TextStyle(color: Color(0xFFB9AA86)),
+          fillColor: const Color(0xFF10283B),
+          hintStyle: const TextStyle(color: Color(0xFF8EA9BD)),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
             borderSide: BorderSide.none,
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFD9A441)),
+            borderSide: const BorderSide(color: Color(0xFF22D3EE)),
           ),
         ),
       ),

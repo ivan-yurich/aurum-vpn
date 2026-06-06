@@ -15,18 +15,18 @@ import '../services/sing_box_config_builder.dart';
 import '../services/vpn_engine.dart';
 import 'qr_scan_screen.dart';
 
-const _gold = Color(0xFFD9A441);
-const _goldSoft = Color(0xFFFFE6A3);
-const _ink = Color(0xFF0E0B07);
-const _surface = Color(0xFF18130B);
-const _surfaceMetric = Color(0xFF2D2110);
-const _mutedGold = Color(0xFFB9AA86);
+const _gold = Color(0xFF0EA5FF);
+const _goldSoft = Color(0xFFEAF7FF);
+const _ink = Color(0xFF06111C);
+const _surface = Color(0xFF0D1A27);
+const _surfaceMetric = Color(0xFF10283B);
+const _mutedGold = Color(0xFF8EA9BD);
 const _appName = 'Yurich Connect';
 const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.33';
+const _appVersion = '1.0.34';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
@@ -1802,9 +1802,14 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Row(
           children: [
-            CircleAvatar(
-              radius: 17,
-              backgroundImage: AssetImage('assets/images/app_icon.png'),
+            ClipRRect(
+              borderRadius: BorderRadius.all(Radius.circular(8)),
+              child: Image(
+                image: AssetImage('assets/images/app_icon.png'),
+                width: 36,
+                height: 36,
+                fit: BoxFit.cover,
+              ),
             ),
             SizedBox(width: 10),
             Text(_appName),
@@ -2011,22 +2016,22 @@ class _UptimeButton extends StatelessWidget {
             gradient: RadialGradient(
               colors: connected
                   ? const [
-                      Color(0xFFFFF2BC),
-                      Color(0xFFFFC857),
-                      Color(0xFFE09B12),
+                      Color(0xFFEAF7FF),
+                      Color(0xFF22D3EE),
+                      Color(0xFF0EA5FF),
                     ]
-                  : const [Color(0xFF3B2B12), _surfaceMetric],
+                  : const [Color(0xFF10283B), _surfaceMetric],
             ),
             border: Border.all(
               color: connected
-                  ? const Color(0xFFFFF0B0)
+                  ? const Color(0xFFA7F3FF)
                   : _gold.withValues(alpha: 0.35),
               width: connected ? 2.2 : 1.5,
             ),
             boxShadow: [
               BoxShadow(
                 color: connected
-                    ? const Color(0xFFFFB703).withValues(alpha: 0.62)
+                    ? const Color(0xFF00C8FF).withValues(alpha: 0.58)
                     : Colors.black38,
                 blurRadius: connected ? 34 : 22,
                 offset: const Offset(0, 12),
