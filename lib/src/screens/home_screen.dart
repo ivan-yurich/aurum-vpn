@@ -17,6 +17,8 @@ import 'qr_scan_screen.dart';
 
 const _gold = Color(0xFF0EA5FF);
 const _goldSoft = Color(0xFFEAF7FF);
+const _danger = Color(0xFFFF3B5C);
+const _dangerSoft = Color(0xFFFFD7DF);
 const _ink = Color(0xFF06111C);
 const _surface = Color(0xFF0D1A27);
 const _surfaceMetric = Color(0xFF10283B);
@@ -26,7 +28,7 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.34';
+const _appVersion = '1.0.35';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
@@ -162,6 +164,30 @@ class _HomeScreenState extends State<HomeScreen> {
 
   bool get _connected =>
       _status == AurumVpnStatus.started || _status == AurumVpnStatus.starting;
+
+  bool get _connectionDegraded {
+    if (_stoppingByUser) {
+      return false;
+    }
+    if (_autoReconnectInFlight || _tunnelHealthFailures > 0) {
+      return true;
+    }
+    if (_autoRecoveryArmed && _lastError != null && _lastError!.isNotEmpty) {
+      return true;
+    }
+    if (_autoRecoveryArmed && _status == AurumVpnStatus.stopped) {
+      return true;
+    }
+    if (_status == AurumVpnStatus.started) {
+      final lastHealthyAt = _lastHealthyAt;
+      if (lastHealthyAt != null &&
+          DateTime.now().difference(lastHealthyAt) >
+              const Duration(minutes: 4)) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   @override
   void initState() {
@@ -1544,6 +1570,7 @@ class _HomeScreenState extends State<HomeScreen> {
       'config_target: ${_vpnEngine.configTarget.name}',
       if (_lastConfigSummary != null) 'config: $_lastConfigSummary',
       'status: $_status',
+      'connection_degraded: $_connectionDegraded',
       'message: ${_redactSensitive(_message)}',
       if (_lastError != null) 'last_error: $_lastError',
       'uptime: ${_formatDuration(_connectedDuration)}',
@@ -1823,6 +1850,7 @@ class _HomeScreenState extends State<HomeScreen> {
             _StatusPanel(
               strings: s,
               status: _status,
+              degraded: _connectionDegraded,
               message: _message,
               uplink: _uplink,
               downlink: _downlink,
@@ -1893,6 +1921,7 @@ class _StatusPanel extends StatelessWidget {
   const _StatusPanel({
     required this.strings,
     required this.status,
+    required this.degraded,
     required this.message,
     required this.uplink,
     required this.downlink,
@@ -1903,6 +1932,7 @@ class _StatusPanel extends StatelessWidget {
 
   final _Strings strings;
   final String status;
+  final bool degraded;
   final String message;
   final String uplink;
   final String downlink;
@@ -1914,11 +1944,22 @@ class _StatusPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final connected = status == AurumVpnStatus.started;
     final statusLabel = switch (status) {
-      AurumVpnStatus.started => strings.connected,
+      AurumVpnStatus.started =>
+        degraded ? strings.connectionProblem : strings.connected,
       AurumVpnStatus.starting => strings.connecting,
       AurumVpnStatus.stopping => strings.disconnecting,
       _ => strings.stopped,
     };
+    final accent = degraded
+        ? _danger
+        : connected
+        ? _gold
+        : Colors.white12;
+    final glow = degraded
+        ? _danger.withValues(alpha: 0.22)
+        : connected
+        ? _gold.withValues(alpha: 0.18)
+        : Colors.black26;
 
     return SizedBox(
       height: 212,
@@ -1926,13 +1967,9 @@ class _StatusPanel extends StatelessWidget {
         decoration: BoxDecoration(
           color: _surface,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: connected ? _gold : Colors.white12),
+          border: Border.all(color: accent),
           boxShadow: [
-            BoxShadow(
-              color: connected ? _gold.withValues(alpha: 0.18) : Colors.black26,
-              blurRadius: 18,
-              offset: const Offset(0, 8),
-            ),
+            BoxShadow(color: glow, blurRadius: 18, offset: const Offset(0, 8)),
           ],
         ),
         child: Padding(
@@ -1943,8 +1980,16 @@ class _StatusPanel extends StatelessWidget {
               Row(
                 children: [
                   Icon(
-                    connected ? Icons.verified_user : Icons.shield_outlined,
-                    color: connected ? _goldSoft : _mutedGold,
+                    degraded
+                        ? Icons.warning_amber_rounded
+                        : connected
+                        ? Icons.verified_user
+                        : Icons.shield_outlined,
+                    color: degraded
+                        ? _dangerSoft
+                        : connected
+                        ? _goldSoft
+                        : _mutedGold,
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -1972,6 +2017,7 @@ class _StatusPanel extends StatelessWidget {
                   const SizedBox(width: 14),
                   _UptimeButton(
                     connected: connected,
+                    degraded: degraded,
                     uptime: uptime,
                     enabled: toggleEnabled,
                     onPressed: onToggle,
@@ -1993,12 +2039,14 @@ class _StatusPanel extends StatelessWidget {
 class _UptimeButton extends StatelessWidget {
   const _UptimeButton({
     required this.connected,
+    required this.degraded,
     required this.uptime,
     required this.enabled,
     required this.onPressed,
   });
 
   final bool connected;
+  final bool degraded;
   final String uptime;
   final bool enabled;
   final VoidCallback onPressed;
@@ -2015,22 +2063,32 @@ class _UptimeButton extends StatelessWidget {
             shape: BoxShape.circle,
             gradient: RadialGradient(
               colors: connected
-                  ? const [
-                      Color(0xFFEAF7FF),
-                      Color(0xFF22D3EE),
-                      Color(0xFF0EA5FF),
-                    ]
+                  ? degraded
+                        ? const [
+                            Color(0xFFFFD7DF),
+                            Color(0xFFFF6B81),
+                            Color(0xFFFF244A),
+                          ]
+                        : const [
+                            Color(0xFFEAF7FF),
+                            Color(0xFF22D3EE),
+                            Color(0xFF0EA5FF),
+                          ]
                   : const [Color(0xFF10283B), _surfaceMetric],
             ),
             border: Border.all(
-              color: connected
+              color: degraded
+                  ? const Color(0xFFFFB3C0)
+                  : connected
                   ? const Color(0xFFA7F3FF)
                   : _gold.withValues(alpha: 0.35),
               width: connected ? 2.2 : 1.5,
             ),
             boxShadow: [
               BoxShadow(
-                color: connected
+                color: degraded
+                    ? _danger.withValues(alpha: 0.56)
+                    : connected
                     ? const Color(0xFF00C8FF).withValues(alpha: 0.58)
                     : Colors.black38,
                 blurRadius: connected ? 34 : 22,
@@ -2049,7 +2107,9 @@ class _UptimeButton extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(
-                      connected
+                      degraded
+                          ? Icons.priority_high_rounded
+                          : connected
                           ? Icons.timer_outlined
                           : Icons.power_settings_new,
                       color: connected ? _ink : _goldSoft,
@@ -2879,6 +2939,7 @@ class _Strings {
     required this.pasteFromClipboard,
     required this.language,
     required this.connected,
+    required this.connectionProblem,
     required this.connecting,
     required this.disconnecting,
     required this.stopped,
@@ -2952,6 +3013,7 @@ class _Strings {
   final String pasteFromClipboard;
   final String language;
   final String connected;
+  final String connectionProblem;
   final String connecting;
   final String disconnecting;
   final String stopped;
@@ -3171,6 +3233,7 @@ class _Strings {
     pasteFromClipboard: 'Вставить из буфера',
     language: 'Язык',
     connected: 'Подключено',
+    connectionProblem: 'Нет стабильного соединения',
     connecting: 'Подключаюсь',
     disconnecting: 'Отключаюсь',
     stopped: 'Остановлено',
@@ -3283,6 +3346,7 @@ class _Strings {
     pasteFromClipboard: 'Paste from clipboard',
     language: 'Language',
     connected: 'Connected',
+    connectionProblem: 'Connection problem',
     connecting: 'Connecting',
     disconnecting: 'Disconnecting',
     stopped: 'Stopped',

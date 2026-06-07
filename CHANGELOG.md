@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.35 - 2026-06-07
+
+- Added a native Android foreground-service health keeper that probes the local
+  mixed proxy in the background and reloads sing-box when the tunnel is alive as
+  a service but no longer passes traffic.
+- Added a red degraded connection state for stalled or auto-recovering tunnels,
+  so the main action button no longer stays visually healthy when the connection
+  is broken.
+- Extended VPN diagnostics with the degraded connection flag, health-failure
+  counters, reconnect attempts, uptime, profile ping, and last healthy timestamps.
+
 ## 1.0.32 - 2026-06-05
 
 - Renamed the Android app brand from Aurum VPN to Yurich Connect across the

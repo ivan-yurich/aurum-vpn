@@ -27,9 +27,14 @@ import io.nekohasekai.libbox.SystemProxyStatus
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import java.net.InetSocketAddress
+import java.net.Socket
 
 class BoxService(
     private val service: Service, private val platformInterface: PlatformInterface
@@ -38,6 +43,11 @@ class BoxService(
     companion object {
         const val ACTION_START = "io.nekohasekai.sfa.ACTION_START"
         const val EXTRA_CONFIG_CONTENT = "config_content"
+        private const val WATCHDOG_MIXED_PROXY_PORT = 20808
+        private const val WATCHDOG_INITIAL_GRACE_MS = 45_000L
+        private const val WATCHDOG_INTERVAL_MS = 30_000L
+        private const val WATCHDOG_RESTART_COOLDOWN_MS = 60_000L
+        private const val WATCHDOG_FAILURE_LIMIT = 3
 
         fun start() {
             val intent = runBlocking {
@@ -68,6 +78,11 @@ class BoxService(
         ServiceNotification(status, service) 
     }
     private var commandServer: CommandServer? = null
+    private var watchdogJob: Job? = null
+    private var watchdogFailures = 0
+    private var watchdogMixedProxyEnabled = false
+    private var lastWatchdogRestartAt = 0L
+    @Volatile private var watchdogRestarting = false
     private var receiverRegistered = false
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -105,6 +120,10 @@ class BoxService(
             android.util.Log.e("BoxService", "Loading configuration from SimpleConfigManager")
             val content = SimpleConfigManager.getConfig()
             android.util.Log.e("BoxService", "Config loaded, length: ${content.length}")
+            watchdogMixedProxyEnabled =
+                content.contains("\"type\"") &&
+                content.contains("\"mixed\"") &&
+                content.contains("$WATCHDOG_MIXED_PROXY_PORT")
             
             if (content.isBlank() || content == "{}") {
                 android.util.Log.e("BoxService", "Empty configuration detected")
@@ -158,6 +177,7 @@ class BoxService(
             
             android.util.Log.e("BoxService", "Starting notification")
             notification.start()
+            startNativeWatchdog()
             
             android.util.Log.e("BoxService", "Service startup complete")
         } catch (e: Exception) {
@@ -168,6 +188,7 @@ class BoxService(
     }
 
     override fun serviceReload() {
+        stopNativeWatchdog()
         notification.stop()
         status.postValue(Status.Starting)
             // Broadcast status change
@@ -228,6 +249,7 @@ class BoxService(
     @OptIn(DelicateCoroutinesApi::class)
     private fun stopService() {
         if (status.value != Status.Started && status.value != Status.Starting) return
+        stopNativeWatchdog()
         status.value = Status.Stopping
         
 
@@ -277,6 +299,7 @@ class BoxService(
 
     private suspend fun stopAndAlert(type: Alert, message: String? = null) {
         android.util.Log.e("BoxService", "stopAndAlert called: ${type.name}, message: $message")
+        stopNativeWatchdog()
         runCatching {
             SimpleConfigManager.setStartedByUser(false)
         }
@@ -384,6 +407,7 @@ class BoxService(
     }
 
     internal fun onDestroy() {
+        stopNativeWatchdog()
         runCatching {
             if (receiverRegistered) {
                 service.unregisterReceiver(receiver)
@@ -428,5 +452,141 @@ class BoxService(
     internal fun sendNotification(notification: io.nekohasekai.libbox.Notification) {
         // Basic notification handling - can be extended later
         android.util.Log.d("BoxService", "Notification: ${notification.title} - ${notification.body}")
+    }
+
+    private fun broadcastStatus(nextStatus: Status) {
+        Application.application.sendBroadcast(
+            Intent(Action.BROADCAST_STATUS_CHANGED).apply {
+                `package` = Application.application.packageName
+                putExtra(Action.EXTRA_STATUS, nextStatus.ordinal)
+            }
+        )
+    }
+
+    private fun startNativeWatchdog() {
+        watchdogJob?.cancel()
+        watchdogFailures = 0
+
+        if (!watchdogMixedProxyEnabled) {
+            android.util.Log.d(
+                "BoxService",
+                "Native watchdog skipped: mixed proxy $WATCHDOG_MIXED_PROXY_PORT not found"
+            )
+            return
+        }
+
+        watchdogJob = GlobalScope.launch(Dispatchers.IO) {
+            delay(WATCHDOG_INITIAL_GRACE_MS)
+            while (isActive && status.value == Status.Started) {
+                if (DefaultNetworkMonitor.defaultNetwork == null) {
+                    watchdogFailures = 0
+                    android.util.Log.w("BoxService", "Watchdog: waiting for default network")
+                    withContext(Dispatchers.Main) {
+                        notification.show(lastProfileName, "Ожидание сети...")
+                    }
+                    delay(15_000L)
+                    continue
+                }
+
+                val healthy = probeMixedProxy()
+                if (healthy) {
+                    if (watchdogFailures > 0) {
+                        android.util.Log.d("BoxService", "Watchdog: tunnel recovered")
+                    }
+                    watchdogFailures = 0
+                } else {
+                    watchdogFailures += 1
+                    android.util.Log.w(
+                        "BoxService",
+                        "Watchdog: tunnel probe failed #$watchdogFailures"
+                    )
+                    if (watchdogFailures >= WATCHDOG_FAILURE_LIMIT) {
+                        watchdogFailures = 0
+                        restartFromWatchdog("health-probe")
+                    }
+                }
+
+                delay(WATCHDOG_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun stopNativeWatchdog() {
+        watchdogJob?.cancel()
+        watchdogJob = null
+        watchdogFailures = 0
+        watchdogRestarting = false
+    }
+
+    private suspend fun restartFromWatchdog(reason: String) {
+        val now = System.currentTimeMillis()
+        if (watchdogRestarting || now - lastWatchdogRestartAt < WATCHDOG_RESTART_COOLDOWN_MS) {
+            android.util.Log.w("BoxService", "Watchdog: restart skipped by cooldown")
+            return
+        }
+
+        watchdogRestarting = true
+        lastWatchdogRestartAt = now
+        try {
+            android.util.Log.w("BoxService", "Watchdog: restarting sing-box after $reason")
+            status.postValue(Status.Starting)
+            broadcastStatus(Status.Starting)
+            withContext(Dispatchers.Main) {
+                notification.show(lastProfileName, "Восстановление соединения...")
+            }
+
+            val pfd = fileDescriptor
+            if (pfd != null) {
+                runCatching { pfd.close() }
+                fileDescriptor = null
+            }
+            runCatching {
+                commandServer?.closeService()
+            }.onFailure {
+                android.util.Log.e("BoxService", "Watchdog: closeService failed", it)
+            }
+
+            delay(900L)
+            startService()
+        } finally {
+            watchdogRestarting = false
+        }
+    }
+
+    private fun probeMixedProxy(): Boolean {
+        val targets = arrayOf(
+            "cp.cloudflare.com" to 443,
+            "www.gstatic.com" to 443
+        )
+
+        for ((host, port) in targets) {
+            var socket: Socket? = null
+            try {
+                socket = Socket()
+                socket.connect(
+                    InetSocketAddress("127.0.0.1", WATCHDOG_MIXED_PROXY_PORT),
+                    2500
+                )
+                socket.soTimeout = 3500
+                val request = "CONNECT $host:$port HTTP/1.1\r\n" +
+                    "Host: $host:$port\r\n" +
+                    "Connection: close\r\n\r\n"
+                socket.getOutputStream().write(request.toByteArray(Charsets.US_ASCII))
+                socket.getOutputStream().flush()
+                val statusLine = socket.getInputStream()
+                    .bufferedReader(Charsets.US_ASCII)
+                    .readLine()
+                if (statusLine?.contains(" 200 ") == true) {
+                    return true
+                }
+                android.util.Log.w("BoxService", "Watchdog probe HTTP status: $statusLine")
+            } catch (e: Exception) {
+                android.util.Log.w("BoxService", "Watchdog probe failed for $host: ${e.message}")
+            } finally {
+                runCatching { socket?.close() }
+            }
+        }
+
+        return false
     }
 }
