@@ -12,6 +12,7 @@ JSON profiles.
 Use the GitHub Release asset:
 
 - `YurichConnect-android-release.apk`
+- Releases: [ivan-yurich/Yurich-Connect-Android](https://github.com/ivan-yurich/Yurich-Connect-Android/releases)
 
 Android may warn about APKs installed outside Google Play until the app is
 published and verified by Play Protect.
@@ -90,4 +91,4 @@ build/app/outputs/apk/release/app-release.apk
 ```
 
 Windows-версия ведётся отдельно в репозитории
-[`ivan-yurich/aurum-vpn-windows`](https://github.com/ivan-yurich/aurum-vpn-windows).
+[`ivan-yurich/yurich-connect-windows`](https://github.com/ivan-yurich/yurich-connect-windows).

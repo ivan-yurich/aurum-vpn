@@ -44,10 +44,10 @@ class BoxService(
         const val ACTION_START = "io.nekohasekai.sfa.ACTION_START"
         const val EXTRA_CONFIG_CONTENT = "config_content"
         private const val WATCHDOG_MIXED_PROXY_PORT = 20808
-        private const val WATCHDOG_INITIAL_GRACE_MS = 45_000L
-        private const val WATCHDOG_INTERVAL_MS = 30_000L
-        private const val WATCHDOG_RESTART_COOLDOWN_MS = 60_000L
-        private const val WATCHDOG_FAILURE_LIMIT = 3
+        private const val WATCHDOG_INITIAL_GRACE_MS = 30_000L
+        private const val WATCHDOG_INTERVAL_MS = 20_000L
+        private const val WATCHDOG_RESTART_COOLDOWN_MS = 45_000L
+        private const val WATCHDOG_FAILURE_LIMIT = 2
 
         fun start() {
             val intent = runBlocking {

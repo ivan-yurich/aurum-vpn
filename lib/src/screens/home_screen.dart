@@ -28,7 +28,7 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.35';
+const _appVersion = '1.0.36';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
@@ -2549,43 +2549,57 @@ class _ProfileInsightPanel extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
+                  Column(
                     children: [
-                      _Metric(
+                      _InsightRow(
+                        icon: Icons.route_outlined,
                         label: strings.protocolLabel,
                         value: kindLabel(profile!.kind),
                       ),
-                      _Metric(
+                      _InsightRow(
+                        icon: Icons.network_cell_outlined,
                         label: strings.networkLabel,
                         value: strings.mobileReady,
                       ),
-                      _Metric(
+                      _InsightRow(
+                        icon: Icons.dns_outlined,
                         label: strings.dnsLabel,
                         value: strings.dnsCountryValue,
                       ),
+                      _InsightRow(
+                        icon: Icons.security_update_good_outlined,
+                        label: strings.stabilityLabel,
+                        value: strings.stabilityValue,
+                      ),
                       if (countryFlag != null)
-                        _Metric(
+                        _InsightRow(
+                          icon: Icons.flag_outlined,
                           label: strings.countryLabel,
                           value: countryFlag!,
                         ),
-                      InkWell(
+                      _InsightRow(
+                        icon: Icons.speed_outlined,
+                        label: strings.pingLabel,
+                        value: pingLabel ?? 'ping',
                         onTap: onPing,
-                        borderRadius: BorderRadius.circular(8),
-                        child: _Metric(
-                          label: strings.pingLabel,
-                          value: pingLabel ?? 'ping',
-                        ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 10),
                   Text(
                     strings.mobileNetworkAdvice,
                     style: const TextStyle(color: _mutedGold, height: 1.35),
                   ),
                   const SizedBox(height: 8),
+                  Text(
+                    strings.androidVpnVisibleNote,
+                    style: const TextStyle(
+                      color: _mutedGold,
+                      height: 1.35,
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
                   Text(
                     '${strings.endpointLabel}: ${profile!.endpoint}',
                     style: const TextStyle(color: _mutedGold),
@@ -2595,6 +2609,69 @@ class _ProfileInsightPanel extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _InsightRow extends StatelessWidget {
+  const _InsightRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final child = Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Row(
+        children: [
+          Icon(icon, color: _goldSoft, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: _mutedGold, letterSpacing: 0),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
+              style: const TextStyle(
+                color: _goldSoft,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0,
+              ),
+            ),
+          ),
+          if (onTap != null) ...[
+            const SizedBox(width: 6),
+            const Icon(Icons.refresh, color: _mutedGold, size: 16),
+          ],
+        ],
+      ),
+    );
+
+    if (onTap == null) {
+      return child;
+    }
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: child,
     );
   }
 }
@@ -2955,6 +3032,8 @@ class _Strings {
     required this.networkLabel,
     required this.dnsLabel,
     required this.dnsCountryValue,
+    required this.stabilityLabel,
+    required this.stabilityValue,
     required this.countryLabel,
     required this.pingLabel,
     required this.subscriptionLabel,
@@ -2962,6 +3041,7 @@ class _Strings {
     required this.subscriptionExpired,
     required this.mobileReady,
     required this.mobileNetworkAdvice,
+    required this.androidVpnVisibleNote,
     required this.endpointLabel,
     required this.connect,
     required this.disconnect,
@@ -3029,6 +3109,8 @@ class _Strings {
   final String networkLabel;
   final String dnsLabel;
   final String dnsCountryValue;
+  final String stabilityLabel;
+  final String stabilityValue;
   final String countryLabel;
   final String pingLabel;
   final String subscriptionLabel;
@@ -3036,6 +3118,7 @@ class _Strings {
   final String subscriptionExpired;
   final String mobileReady;
   final String mobileNetworkAdvice;
+  final String androidVpnVisibleNote;
   final String endpointLabel;
   final String connect;
   final String disconnect;
@@ -3250,7 +3333,9 @@ class _Strings {
     protocolLabel: 'Протокол',
     networkLabel: 'Сеть',
     dnsLabel: 'DNS',
-    dnsCountryValue: 'DNS сервера VPN',
+    dnsCountryValue: 'Через профиль',
+    stabilityLabel: 'Стабильность',
+    stabilityValue: 'Фоновый keeper',
     countryLabel: 'Страна',
     pingLabel: 'Пинг',
     subscriptionLabel: 'Подписка',
@@ -3258,7 +3343,9 @@ class _Strings {
     subscriptionExpired: 'Истекла',
     mobileReady: 'Wi‑Fi / LTE',
     mobileNetworkAdvice:
-        'Подключение настроено для Wi‑Fi и мобильных сетей. DNS работает в режиме сервера VPN: приложение не подменяет страну отдельным DoH, а при смене профиля полностью пересобирает конфиг.',
+        'Wi‑Fi/LTE: строгий TUN, FakeIP и DNS через выбранный профиль; keeper перепроверяет туннель без открытия приложения.',
+    androidVpnVisibleNote:
+        'Android может показать приложениям факт VPN. Yurich Connect защищает IP/DNS, но системный VpnService не скрывается без root/прошивки.',
     endpointLabel: 'Сервер',
     connect: 'Подключить',
     disconnect: 'Отключить',
@@ -3362,7 +3449,9 @@ class _Strings {
     protocolLabel: 'Protocol',
     networkLabel: 'Network',
     dnsLabel: 'DNS',
-    dnsCountryValue: 'VPN server DNS',
+    dnsCountryValue: 'Through profile',
+    stabilityLabel: 'Stability',
+    stabilityValue: 'Background keeper',
     countryLabel: 'Country',
     pingLabel: 'Ping',
     subscriptionLabel: 'Subscription',
@@ -3370,7 +3459,9 @@ class _Strings {
     subscriptionExpired: 'Expired',
     mobileReady: 'Wi‑Fi / LTE',
     mobileNetworkAdvice:
-        'The connection is tuned for Wi‑Fi and mobile networks. DNS follows the VPN server mode instead of forcing a separate DoH resolver, and the app rebuilds the config when switching profiles.',
+        'Wi-Fi/LTE: strict TUN, FakeIP, DNS through the selected profile, and a background keeper that checks the tunnel without opening the app.',
+    androidVpnVisibleNote:
+        'Android can expose VPN status to apps. Yurich Connect protects IP/DNS, but system VpnService cannot be hidden without root/custom firmware.',
     endpointLabel: 'Server',
     connect: 'Connect',
     disconnect: 'Disconnect',

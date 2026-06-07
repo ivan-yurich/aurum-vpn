@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.36 - 2026-06-08
+
+- Pointed Android in-app updates to the renamed GitHub repository:
+  `ivan-yurich/Yurich-Connect-Android`.
+- Updated project documentation to use the Yurich Connect Android repository
+  address.
+- Bumped the Android app version so phones can receive the repository-migration
+  update through the built-in updater.
+- Reworked the profile/network panel into compact rows for protocol, Wi-Fi/LTE,
+  DNS, background stability, country, ping, and endpoint.
+- Added a clear note that Android apps can detect the system VPN service through
+  OS APIs; the app protects IP/DNS routing but cannot hide Android VpnService
+  without unsupported root/system tricks.
+- Renamed the DNS status to "through profile" so the UI matches the current
+  tunnel/FakeIP behavior without implying a forced third-party resolver.
+- Kept the current mobile protocol tuning intact while retaining the native
+  background health keeper for long-running Wi-Fi/LTE sessions.
+- Made the native health keeper recover faster on mobile handoffs by reducing
+  the probe grace, interval, cooldown, and failure threshold.
+
 ## 1.0.35 - 2026-06-07
 
 - Added a native Android foreground-service health keeper that probes the local
