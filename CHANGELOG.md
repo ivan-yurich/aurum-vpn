@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.38 - 2026-06-08
+
+- Added profile country detection and cached country metadata.
+- Profile cards now show a country flag when the subscription name contains one,
+  when the endpoint IP geolocation is resolved, or after the real VPN exit
+  country is detected through the local tunnel proxy.
+- Unknown countries now show a neutral globe instead of a protocol-only icon.
+- Developer diagnostics now include cached country code/name for profiles.
+
 ## 1.0.37 - 2026-06-08
 
 - Fixed profile ping for Hysteria/Hysteria2: UDP/QUIC profiles are no longer

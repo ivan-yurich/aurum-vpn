@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../models/vpn_profile.dart';
 import '../services/app_update_service.dart';
+import '../services/profile_geo_service.dart';
 import '../services/profile_importer.dart';
 import '../services/profile_store.dart';
 import '../services/sing_box_config_builder.dart';
@@ -28,7 +29,7 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.37';
+const _appVersion = '1.0.38';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
@@ -92,6 +93,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final _importer = ProfileImporter();
   final _configBuilder = SingBoxConfigBuilder();
   final _updateService = AppUpdateService();
+  final _geoService = ProfileGeoService();
   final _manualController = TextEditingController();
 
   StreamSubscription<Map<String, dynamic>>? _statusSubscription;
@@ -131,6 +133,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _autoReconnectInFlight = false;
   bool _autoRecoveryArmed = false;
   bool _pingAllInFlight = false;
+  bool _countryResolveInFlight = false;
   bool _logsExpanded = false;
   String? _lastConfigSummary;
   String? _updateMessage;
@@ -242,6 +245,7 @@ class _HomeScreenState extends State<HomeScreen> {
           : strings.loadedProfiles(profiles.length);
     });
     unawaited(_pingProfiles(profiles));
+    unawaited(_resolveProfileCountries(profiles));
   }
 
   Future<void> _initVpn() async {
@@ -500,13 +504,29 @@ class _HomeScreenState extends State<HomeScreen> {
         throw ProfileImportException(s.nothingToImport);
       }
 
+      final existingById = {
+        for (final profile in _profiles) profile.id: profile,
+      };
+      final importedWithCachedGeo = imported
+          .map((profile) {
+            final existing = existingById[profile.id];
+            if (existing == null) {
+              return profile;
+            }
+            return profile.copyWith(
+              countryCode: existing.countryCode,
+              countryName: existing.countryName,
+            );
+          })
+          .toList(growable: false);
+
       final merged = <String, VpnProfile>{
         for (final profile in _profiles) profile.id: profile,
-        for (final profile in imported) profile.id: profile,
+        for (final profile in importedWithCachedGeo) profile.id: profile,
       }.values.toList();
 
       await _store.saveProfiles(merged);
-      await _store.saveSelectedProfileId(imported.first.id);
+      await _store.saveSelectedProfileId(importedWithCachedGeo.first.id);
       _manualController.clear();
 
       if (!mounted) {
@@ -514,11 +534,12 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       setState(() {
         _profiles = merged;
-        _selectedProfileId = imported.first.id;
-        _profileTab = _profileTabForKind(imported.first.kind);
+        _selectedProfileId = importedWithCachedGeo.first.id;
+        _profileTab = _profileTabForKind(importedWithCachedGeo.first.kind);
         _message = s.imported(imported.length);
       });
       unawaited(_pingProfiles(merged));
+      unawaited(_resolveProfileCountries(merged));
       _showSnack(s.importedProfiles(imported.length));
     });
   }
@@ -718,6 +739,7 @@ class _HomeScreenState extends State<HomeScreen> {
         _message = s.connectionProfile(profile.name);
       });
     }
+    unawaited(_refreshConnectedCountry(profile.id));
   }
 
   Future<void> _disconnect() async {
@@ -1233,10 +1255,82 @@ class _HomeScreenState extends State<HomeScreen> {
     return type == 'hysteria' || type == 'hysteria2' || type == 'hy2';
   }
 
+  Future<void> _resolveProfileCountries(List<VpnProfile> profiles) async {
+    if (_countryResolveInFlight || profiles.isEmpty) {
+      return;
+    }
+
+    _countryResolveInFlight = true;
+    try {
+      for (final profile in profiles.take(48)) {
+        if (!mounted) {
+          return;
+        }
+        if (_leadingFlag(profile.name) != null ||
+            (profile.countryCode ?? '').trim().isNotEmpty) {
+          continue;
+        }
+
+        final geo = await _geoService.resolveEndpointCountry(profile);
+        if (geo != null) {
+          await _saveProfileCountry(profile.id, geo);
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 180));
+      }
+    } finally {
+      _countryResolveInFlight = false;
+    }
+  }
+
+  Future<void> _refreshConnectedCountry(String profileId) async {
+    await Future<void>.delayed(const Duration(milliseconds: 1400));
+    if (!mounted || _status != AurumVpnStatus.started) {
+      return;
+    }
+
+    final geo = await _geoService.resolveExitCountryThroughTunnel();
+    if (geo != null) {
+      await _saveProfileCountry(profileId, geo);
+      _queueLog(
+        'Geo: exit country ${geo.countryCode}'
+        '${geo.ip == null ? '' : ' via ${geo.ip}'}',
+      );
+    }
+  }
+
+  Future<void> _saveProfileCountry(String profileId, ProfileGeo geo) async {
+    final index = _profiles.indexWhere((profile) => profile.id == profileId);
+    if (index < 0) {
+      return;
+    }
+
+    final current = _profiles[index];
+    if (current.countryCode == geo.countryCode &&
+        current.countryName == geo.countryName) {
+      return;
+    }
+
+    final next = [..._profiles];
+    next[index] = current.copyWith(
+      countryCode: geo.countryCode,
+      countryName: geo.countryName,
+    );
+    await _store.saveProfiles(next);
+    if (!mounted) {
+      return;
+    }
+    setState(() => _profiles = next);
+  }
+
   String? _profileCountryFlag(VpnProfile profile) {
     final existing = _leadingFlag(profile.name);
     if (existing != null) {
       return existing;
+    }
+
+    final cached = ProfileGeo.countryCodeToFlag(profile.countryCode);
+    if (cached != null) {
+      return cached;
     }
 
     final haystack = '${profile.name} ${profile.server ?? ''}'.toLowerCase();
@@ -1269,7 +1363,21 @@ class _HomeScreenState extends State<HomeScreen> {
     if (haystack.contains('netherlands') || haystack.contains('нидер')) {
       return '🇳🇱';
     }
-    return null;
+    if (haystack.contains('france') || haystack.contains('франц')) {
+      return '🇫🇷';
+    }
+    if (haystack.contains('canada') || haystack.contains('канада')) {
+      return '🇨🇦';
+    }
+    if (haystack.contains('turkey') || haystack.contains('турц')) {
+      return '🇹🇷';
+    }
+    if (haystack.contains('uk') ||
+        haystack.contains('united kingdom') ||
+        haystack.endsWith('.co.uk')) {
+      return '🇬🇧';
+    }
+    return '🌐';
   }
 
   String _profileDisplayName(VpnProfile profile) {
@@ -1627,7 +1735,9 @@ class _HomeScreenState extends State<HomeScreen> {
         'profile: ${_redactSensitive(profile.name)}',
         'protocol: ${_profileKindLabel(profile.kind)}',
         'endpoint: ${_redactSensitive(profile.endpoint)}',
-        'country: ${_profileCountryFlag(profile) ?? 'unknown'}',
+        'country: ${_profileCountryFlag(profile) ?? 'unknown'}'
+            '${profile.countryCode == null ? '' : ' ${profile.countryCode}'}'
+            '${profile.countryName == null ? '' : ' ${profile.countryName}'}',
         'profile_ping: ${_profilePingLabel(profile)}',
       ],
       'traffic: up=$_uplink down=$_downlink total=$_sessionTotal',
@@ -1642,7 +1752,8 @@ class _HomeScreenState extends State<HomeScreen> {
             '- ${_redactSensitive(item.name)}',
             _profileKindLabel(item.kind),
             _redactSensitive(item.endpoint),
-            'country=${_profileCountryFlag(item) ?? 'unknown'}',
+            'country=${_profileCountryFlag(item) ?? 'unknown'}'
+                '${item.countryCode == null ? '' : ' ${item.countryCode}'}',
             'ping=${_profilePingLabel(item)}',
             if (expires != null) 'expires=$expires',
           ].join(' | ');

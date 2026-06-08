@@ -29,6 +29,8 @@ class VpnProfile {
     this.outbound,
     this.rawConfig,
     this.subscriptionExpiresAt,
+    this.countryCode,
+    this.countryName,
   });
 
   final String id;
@@ -40,6 +42,8 @@ class VpnProfile {
   final Map<String, dynamic>? outbound;
   final String? rawConfig;
   final DateTime? subscriptionExpiresAt;
+  final String? countryCode;
+  final String? countryName;
 
   String get endpoint {
     if (server == null || server!.isEmpty) {
@@ -59,6 +63,8 @@ class VpnProfile {
       'outbound': outbound,
       'rawConfig': rawConfig,
       'subscriptionExpiresAt': subscriptionExpiresAt?.toIso8601String(),
+      'countryCode': countryCode,
+      'countryName': countryName,
     };
   }
 
@@ -78,6 +84,8 @@ class VpnProfile {
       outbound: (json['outbound'] as Map?)?.cast<String, dynamic>(),
       rawConfig: json['rawConfig'] as String?,
       subscriptionExpiresAt: _parseDateTime(json['subscriptionExpiresAt']),
+      countryCode: json['countryCode'] as String?,
+      countryName: json['countryName'] as String?,
     );
   }
 
@@ -91,6 +99,8 @@ class VpnProfile {
     Map<String, dynamic>? outbound,
     String? rawConfig,
     DateTime? subscriptionExpiresAt,
+    String? countryCode,
+    String? countryName,
   }) {
     return VpnProfile(
       id: id ?? this.id,
@@ -103,6 +113,8 @@ class VpnProfile {
       rawConfig: rawConfig ?? this.rawConfig,
       subscriptionExpiresAt:
           subscriptionExpiresAt ?? this.subscriptionExpiresAt,
+      countryCode: countryCode ?? this.countryCode,
+      countryName: countryName ?? this.countryName,
     );
   }
 
