@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.37 - 2026-06-08
+
+- Fixed profile ping for Hysteria/Hysteria2: UDP/QUIC profiles are no longer
+  marked `offline` by a TCP socket check.
+- Hysteria/Hysteria2 profile rows now verify endpoint DNS reachability and show
+  `DNS ... ms` or `UDP ok` instead of a false TCP failure.
+- Bumped Android version for the next install/update package.
+
 ## 1.0.36 - 2026-06-08
 
 - Pointed Android in-app updates to the renamed GitHub repository:

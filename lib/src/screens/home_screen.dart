@@ -28,7 +28,7 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.36';
+const _appVersion = '1.0.37';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
@@ -110,6 +110,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<VpnProfile> _profiles = const [];
   final _profilePingMs = <String, int>{};
+  final _profilePingText = <String, String>{};
   final _profilePingBusy = <String, bool>{};
   final _profilePingError = <String, String>{};
   String? _selectedProfileId;
@@ -1148,6 +1149,27 @@ class _HomeScreenState extends State<HomeScreen> {
     final stopwatch = Stopwatch()..start();
     Socket? socket;
     try {
+      if (_usesUdpEndpoint(profile)) {
+        final addresses = await InternetAddress.lookup(
+          server,
+        ).timeout(const Duration(seconds: 4));
+        if (addresses.isEmpty) {
+          throw const SocketException('DNS lookup returned no addresses');
+        }
+        stopwatch.stop();
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _profilePingMs.remove(profile.id);
+          _profilePingText[profile.id] = stopwatch.elapsedMilliseconds <= 1
+              ? 'UDP ok'
+              : 'DNS ${stopwatch.elapsedMilliseconds} ms';
+          _profilePingError.remove(profile.id);
+        });
+        return;
+      }
+
       socket = await Socket.connect(
         server,
         port,
@@ -1159,6 +1181,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       setState(() {
         _profilePingMs[profile.id] = stopwatch.elapsedMilliseconds;
+        _profilePingText.remove(profile.id);
         _profilePingError.remove(profile.id);
       });
     } on Object catch (error) {
@@ -1167,6 +1190,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       setState(() {
         _profilePingMs.remove(profile.id);
+        _profilePingText.remove(profile.id);
         _profilePingError[profile.id] = _redactSensitive('$error');
       });
     } finally {
@@ -1181,6 +1205,10 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_profilePingBusy[profile.id] == true) {
       return '...';
     }
+    final text = _profilePingText[profile.id];
+    if (text != null) {
+      return text;
+    }
     final ms = _profilePingMs[profile.id];
     if (ms != null) {
       return '$ms ms';
@@ -1189,6 +1217,20 @@ class _HomeScreenState extends State<HomeScreen> {
       return 'offline';
     }
     return 'ping';
+  }
+
+  bool _usesUdpEndpoint(VpnProfile profile) {
+    if (profile.kind == VpnProfileKind.hysteria ||
+        profile.kind == VpnProfileKind.hysteria2) {
+      return true;
+    }
+
+    final outbound = profile.outbound;
+    if (outbound == null) {
+      return false;
+    }
+    final type = outbound['type']?.toString().toLowerCase();
+    return type == 'hysteria' || type == 'hysteria2' || type == 'hy2';
   }
 
   String? _profileCountryFlag(VpnProfile profile) {
