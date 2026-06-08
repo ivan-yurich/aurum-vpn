@@ -29,7 +29,7 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.44';
+const _appVersion = '1.0.45';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
@@ -141,7 +141,9 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _logsExpanded = false;
   String? _lastConfigSummary;
   String? _updateMessage;
+  AppUpdateInfo? _availableUpdate;
   double? _updateProgress;
+  bool _updateNoticeShown = false;
   DateTime? _nextAutoReconnectAt;
   DateTime? _nextTunnelHealthCheckAt;
   int _autoReconnectAttempts = 0;
@@ -258,6 +260,7 @@ class _HomeScreenState extends State<HomeScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         unawaited(_showSubscriptionRenewalReminder(profiles));
+        unawaited(_checkLatestUpdateNotice());
       }
     });
   }
@@ -1869,13 +1872,19 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       if (update == null) {
         if (mounted) {
-          setState(() => _updateMessage = s.updateNoUpdates(_appVersion));
+          setState(() {
+            _availableUpdate = null;
+            _updateMessage = s.updateNoUpdates(_appVersion);
+          });
         }
         return;
       }
 
       if (mounted) {
-        setState(() => _updateMessage = s.updateDownloading(update.version));
+        setState(() {
+          _availableUpdate = update;
+          _updateMessage = s.updateDownloading(update.version);
+        });
       }
 
       final file = await _updateService.download(
@@ -1924,6 +1933,61 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() => _updateBusy = false);
       }
+    }
+  }
+
+  Future<void> _checkLatestUpdateNotice() async {
+    if (_updateBusy) {
+      return;
+    }
+
+    try {
+      final abis = await _updateService.supportedAbis().timeout(
+        const Duration(seconds: 4),
+        onTimeout: () => const <String>[],
+      );
+      final update = await _updateService
+          .findLatest(currentVersion: _appVersion, supportedAbis: abis)
+          .timeout(const Duration(seconds: 26));
+      if (!mounted) {
+        return;
+      }
+
+      if (update == null) {
+        if (_availableUpdate != null) {
+          setState(() => _availableUpdate = null);
+        }
+        return;
+      }
+
+      setState(() {
+        _availableUpdate = update;
+        _updateMessage = s.updateAvailable(update.version);
+      });
+
+      if (_updateNoticeShown) {
+        return;
+      }
+      _updateNoticeShown = true;
+      _showSnack(
+        s.updateAvailableSnack(update.version),
+        action: SnackBarAction(
+          label: s.updateNow,
+          onPressed: () => unawaited(_checkAndInstallUpdate()),
+        ),
+      );
+      await _bestEffortNative(
+        'showUpdateNotification',
+        _vpnEngine
+            .showAppNotification(
+              title: s.updateAvailableTitle,
+              body: s.updateAvailableBody(update.version),
+              id: 7045,
+            )
+            .timeout(_nativeShortTimeout, onTimeout: () => false),
+      );
+    } on Object catch (error) {
+      _queueLog('Update notice check skipped: ${_redactSensitive('$error')}');
     }
   }
 
@@ -2270,7 +2334,7 @@ class _HomeScreenState extends State<HomeScreen> {
               onPing: (profile) => unawaited(_pingProfile(profile)),
             ),
             const SizedBox(height: 16),
-            _SupportPanel(
+            _AppCenterPanel(
               strings: s,
               selectedTab: _supportTab,
               onTabChanged: (tab) => setState(() => _supportTab = tab),
@@ -2282,21 +2346,12 @@ class _HomeScreenState extends State<HomeScreen> {
               onVk: () => _openUrl(_vkUrl),
               onDonate: () => _openUrl(_donateUrl),
               onDeveloper: _emailDeveloper,
-            ),
-            const SizedBox(height: 16),
-            _UpdatePanel(
-              strings: s,
               currentVersion: _appVersion,
-              message: _updateMessage,
-              busy: _updateBusy,
-              progress: _updateProgress,
+              availableVersion: _availableUpdate?.version,
+              updateMessage: _updateMessage,
+              updateBusy: _updateBusy,
+              updateProgress: _updateProgress,
               onCheck: _checkAndInstallUpdate,
-            ),
-            const SizedBox(height: 16),
-            _FaqPanel(strings: s),
-            const SizedBox(height: 16),
-            _LogsPanel(
-              strings: s,
               logs: _logs,
               onExpansionChanged: (expanded) =>
                   unawaited(_setLogsExpanded(expanded)),
@@ -3165,6 +3220,117 @@ class _InsightRow extends StatelessWidget {
   }
 }
 
+class _AppCenterPanel extends StatelessWidget {
+  const _AppCenterPanel({
+    required this.strings,
+    required this.selectedTab,
+    required this.onTabChanged,
+    required this.language,
+    required this.onLanguageChanged,
+    required this.onSupport,
+    required this.onTelegram,
+    required this.onVk,
+    required this.onDonate,
+    required this.onDeveloper,
+    required this.currentVersion,
+    required this.availableVersion,
+    required this.updateMessage,
+    required this.updateBusy,
+    required this.updateProgress,
+    required this.onCheck,
+    required this.logs,
+    required this.onExpansionChanged,
+  });
+
+  final _Strings strings;
+  final _SupportTab selectedTab;
+  final ValueChanged<_SupportTab> onTabChanged;
+  final _AppLanguage language;
+  final ValueChanged<_AppLanguage> onLanguageChanged;
+  final VoidCallback onSupport;
+  final VoidCallback onTelegram;
+  final VoidCallback onVk;
+  final VoidCallback onDonate;
+  final VoidCallback onDeveloper;
+  final String currentVersion;
+  final String? availableVersion;
+  final String? updateMessage;
+  final bool updateBusy;
+  final double? updateProgress;
+  final VoidCallback onCheck;
+  final List<String> logs;
+  final ValueChanged<bool> onExpansionChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: _surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _gold.withValues(alpha: 0.22)),
+        boxShadow: [
+          BoxShadow(
+            color: _gold.withValues(alpha: 0.06),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _SupportPanel(
+              strings: strings,
+              selectedTab: selectedTab,
+              onTabChanged: onTabChanged,
+              language: language,
+              onLanguageChanged: onLanguageChanged,
+              onSupport: onSupport,
+              onTelegram: onTelegram,
+              onVk: onVk,
+              onDonate: onDonate,
+              onDeveloper: onDeveloper,
+            ),
+            const _PanelDivider(),
+            _UpdatePanel(
+              strings: strings,
+              currentVersion: currentVersion,
+              availableVersion: availableVersion,
+              message: updateMessage,
+              busy: updateBusy,
+              progress: updateProgress,
+              onCheck: onCheck,
+            ),
+            const _PanelDivider(),
+            _FaqPanel(strings: strings),
+            const _PanelDivider(),
+            _LogsPanel(
+              strings: strings,
+              logs: logs,
+              onExpansionChanged: onExpansionChanged,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PanelDivider extends StatelessWidget {
+  const _PanelDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return Divider(
+      height: 18,
+      thickness: 1,
+      color: _gold.withValues(alpha: 0.14),
+    );
+  }
+}
+
 class _SupportPanel extends StatelessWidget {
   const _SupportPanel({
     required this.strings,
@@ -3192,104 +3358,186 @@ class _SupportPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                strings.contact,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-            ),
-            SegmentedButton<_SupportTab>(
-              segments: [
-                ButtonSegment(
-                  value: _SupportTab.help,
-                  label: Text(strings.supportTabLabel(_SupportTab.help)),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final actionWidth = constraints.maxWidth >= 340
+            ? (constraints.maxWidth - 10) / 2
+            : constraints.maxWidth;
+        final actions = selectedTab == _SupportTab.help
+            ? [
+                _SupportAction(
+                  icon: Icons.support_agent,
+                  label: strings.support,
+                  onPressed: onSupport,
                 ),
-                ButtonSegment(
-                  value: _SupportTab.community,
-                  label: Text(strings.supportTabLabel(_SupportTab.community)),
+                _SupportAction(
+                  icon: Icons.mail_outline,
+                  label: strings.developer,
+                  onPressed: onDeveloper,
+                ),
+              ]
+            : [
+                _SupportAction(
+                  icon: Icons.forum_outlined,
+                  label: 'Telegram',
+                  onPressed: onTelegram,
+                ),
+                _SupportAction(
+                  icon: Icons.groups_outlined,
+                  label: 'VK',
+                  onPressed: onVk,
+                ),
+                _SupportAction(
+                  icon: Icons.volunteer_activism_outlined,
+                  label: strings.donate,
+                  onPressed: onDonate,
+                ),
+              ];
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.hub_outlined, color: _goldSoft, size: 22),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    strings.contact,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                 ),
               ],
-              selected: {selectedTab},
-              showSelectedIcon: false,
-              onSelectionChanged: (value) {
-                final selected = value.isEmpty ? null : value.first;
-                if (selected != null) {
-                  onTabChanged(selected);
-                }
-              },
-              style: ButtonStyle(
-                visualDensity: VisualDensity.compact,
-                minimumSize: WidgetStateProperty.all(const Size(72, 36)),
-              ),
             ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: selectedTab == _SupportTab.help
-              ? [
-                  OutlinedButton.icon(
-                    onPressed: onSupport,
-                    icon: const Icon(Icons.support_agent),
-                    label: Text(strings.support),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<_SupportTab>(
+                segments: [
+                  ButtonSegment(
+                    value: _SupportTab.help,
+                    label: Text(strings.supportTabLabel(_SupportTab.help)),
                   ),
-                  OutlinedButton.icon(
-                    onPressed: onDeveloper,
-                    icon: const Icon(Icons.mail_outline),
-                    label: Text(strings.developer),
-                  ),
-                ]
-              : [
-                  OutlinedButton.icon(
-                    onPressed: onTelegram,
-                    icon: const Icon(Icons.forum_outlined),
-                    label: const Text('Telegram'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: onVk,
-                    icon: const Icon(Icons.groups_outlined),
-                    label: const Text('VK'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: onDonate,
-                    icon: const Icon(Icons.volunteer_activism_outlined),
-                    label: Text(strings.donate),
+                  ButtonSegment(
+                    value: _SupportTab.community,
+                    label: Text(strings.supportTabLabel(_SupportTab.community)),
                   ),
                 ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Text(strings.language, style: const TextStyle(color: _mutedGold)),
-            const SizedBox(width: 12),
-            SegmentedButton<_AppLanguage>(
-              segments: const [
-                ButtonSegment(value: _AppLanguage.ru, label: Text('RU')),
-                ButtonSegment(value: _AppLanguage.en, label: Text('EN')),
+                selected: {selectedTab},
+                showSelectedIcon: false,
+                onSelectionChanged: (value) {
+                  final selected = value.isEmpty ? null : value.first;
+                  if (selected != null) {
+                    onTabChanged(selected);
+                  }
+                },
+                style: ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  minimumSize: WidgetStateProperty.all(const Size(72, 40)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                for (final action in actions)
+                  SizedBox(
+                    width: actionWidth,
+                    height: 50,
+                    child: _SupportActionButton(action: action),
+                  ),
               ],
-              selected: {language},
-              showSelectedIcon: false,
-              onSelectionChanged: (value) {
-                final selected = value.isEmpty ? null : value.first;
-                if (selected != null) {
-                  onLanguageChanged(selected);
-                }
-              },
-              style: ButtonStyle(
-                visualDensity: VisualDensity.compact,
-                minimumSize: WidgetStateProperty.all(const Size(54, 36)),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: _surfaceMetric,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: _gold.withValues(alpha: 0.16)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.translate, color: _mutedGold, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      strings.language,
+                      style: const TextStyle(color: _mutedGold),
+                    ),
+                  ),
+                  SegmentedButton<_AppLanguage>(
+                    segments: const [
+                      ButtonSegment(value: _AppLanguage.ru, label: Text('RU')),
+                      ButtonSegment(value: _AppLanguage.en, label: Text('EN')),
+                    ],
+                    selected: {language},
+                    showSelectedIcon: false,
+                    onSelectionChanged: (value) {
+                      final selected = value.isEmpty ? null : value.first;
+                      if (selected != null) {
+                        onLanguageChanged(selected);
+                      }
+                    },
+                    style: ButtonStyle(
+                      visualDensity: VisualDensity.compact,
+                      minimumSize: WidgetStateProperty.all(const Size(52, 34)),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
-        ),
-      ],
+        );
+      },
+    );
+  }
+}
+
+class _SupportAction {
+  const _SupportAction({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+}
+
+class _SupportActionButton extends StatelessWidget {
+  const _SupportActionButton({required this.action});
+
+  final _SupportAction action;
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton(
+      onPressed: action.onPressed,
+      style: OutlinedButton.styleFrom(
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        side: BorderSide(color: _gold.withValues(alpha: 0.28)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(action.icon, size: 20),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              action.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -3298,6 +3546,7 @@ class _UpdatePanel extends StatelessWidget {
   const _UpdatePanel({
     required this.strings,
     required this.currentVersion,
+    required this.availableVersion,
     required this.message,
     required this.busy,
     required this.progress,
@@ -3306,6 +3555,7 @@ class _UpdatePanel extends StatelessWidget {
 
   final _Strings strings;
   final String currentVersion;
+  final String? availableVersion;
   final String? message;
   final bool busy;
   final double? progress;
@@ -3313,15 +3563,21 @@ class _UpdatePanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasUpdate = availableVersion != null;
     return ExpansionTile(
       tilePadding: EdgeInsets.zero,
-      leading: const Icon(Icons.system_update_alt, color: _goldSoft),
+      leading: Icon(
+        hasUpdate ? Icons.new_releases_outlined : Icons.system_update_alt,
+        color: hasUpdate ? _gold : _goldSoft,
+      ),
       title: Text(strings.updates),
       subtitle: Text(
-        message ?? strings.updateIdle(currentVersion),
+        hasUpdate
+            ? strings.updateAvailable(availableVersion!)
+            : message ?? strings.updateIdle(currentVersion),
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(color: _mutedGold),
+        style: TextStyle(color: hasUpdate ? _goldSoft : _mutedGold),
       ),
       children: [
         DecoratedBox(
@@ -3335,6 +3591,39 @@ class _UpdatePanel extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (hasUpdate) ...[
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: _gold.withValues(alpha: 0.13),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: _gold.withValues(alpha: 0.32)),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.notifications_active_outlined,
+                            color: _goldSoft,
+                            size: 22,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              strings.updateAvailableBody(availableVersion!),
+                              style: const TextStyle(
+                                color: _goldSoft,
+                                height: 1.3,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 Text(
                   strings.updateDescription,
                   style: const TextStyle(color: _mutedGold, height: 1.35),
@@ -3754,6 +4043,31 @@ class _Strings {
   String updateIdle(String version) => switch (this) {
     _Strings.en => 'Installed version: $version',
     _ => 'Установлена версия: $version',
+  };
+
+  String updateAvailable(String version) => switch (this) {
+    _Strings.en => 'New version available: $version',
+    _ => 'Доступна новая версия: $version',
+  };
+
+  String updateAvailableSnack(String version) => switch (this) {
+    _Strings.en => 'Yurich Connect $version is available.',
+    _ => 'Вышла новая версия Yurich Connect $version.',
+  };
+
+  String get updateAvailableTitle => switch (this) {
+    _Strings.en => 'Yurich Connect update',
+    _ => 'Обновление Yurich Connect',
+  };
+
+  String updateAvailableBody(String version) => switch (this) {
+    _Strings.en => 'Version $version is ready. Open Updates to install it.',
+    _ => 'Версия $version готова. Открой обновления и установи её.',
+  };
+
+  String get updateNow => switch (this) {
+    _Strings.en => 'Update',
+    _ => 'Обновить',
   };
 
   String updateNoUpdates(String version) => switch (this) {

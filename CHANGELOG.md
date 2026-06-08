@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.45 - 2026-06-08
+
+- Reworked the lower app area into a single cleaner center panel with contact
+  actions, language, updates, FAQ, and sing-box logs grouped together.
+- Added automatic background update discovery on app start.
+- When a newer GitHub Release is available, the app now highlights the Updates
+  section, shows an in-app notice, and attempts an Android notification.
+- Kept update installation manual so Android permissions and installer prompts
+  remain predictable for the user.
+
 ## 1.0.44 - 2026-06-08
 
 - Made NaiveProxy startup tolerant to false-negative tunnel probes: when
