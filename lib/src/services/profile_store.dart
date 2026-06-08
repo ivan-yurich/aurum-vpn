@@ -9,6 +9,7 @@ class ProfileStore {
   static const _selectedProfileKey = 'selectedProfileId';
   static const _languageKey = 'languageCode';
   static const _autoConnectKey = 'autoConnect';
+  static const _subscriptionReminderStampKey = 'subscriptionReminderStamp';
   static const _splitTunnelExcludedProcessesKey =
       'splitTunnelExcludedProcesses';
 
@@ -66,6 +67,16 @@ class ProfileStore {
   Future<void> saveAutoConnect(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_autoConnectKey, enabled);
+  }
+
+  Future<String?> loadSubscriptionReminderStamp() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_subscriptionReminderStampKey);
+  }
+
+  Future<void> saveSubscriptionReminderStamp(String stamp) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_subscriptionReminderStampKey, stamp);
   }
 
   Future<List<String>> loadSplitTunnelExcludedProcesses() async {

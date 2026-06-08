@@ -29,10 +29,11 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.38';
+const _appVersion = '1.0.39';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
+const _subscriptionReminderWindow = Duration(days: 5);
 const _tunnelHealthProbeInterval = Duration(seconds: 105);
 const _recentTrafficGrace = Duration(seconds: 120);
 const _tunnelHealthFailureThreshold = 4;
@@ -103,6 +104,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Timer? _trafficFlushTimer;
   Timer? _statusWatchdogTimer;
   Timer? _uptimeTimer;
+  Timer? _subscriptionReminderTimer;
   DateTime? _ignoreStoppedUntil;
   DateTime? _connectedSince;
   DateTime? _lastTrafficAt;
@@ -127,6 +129,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _lastError;
   bool _busy = false;
   bool _updateBusy = false;
+  bool _subscriptionRefreshBusy = false;
   bool _stoppingByUser = false;
   bool _statusWatchdogInFlight = false;
   bool _tunnelHealthCheckInFlight = false;
@@ -208,6 +211,10 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       setState(() => _clockNow = DateTime.now());
     });
+    _subscriptionReminderTimer = Timer.periodic(
+      const Duration(hours: 6),
+      (_) => unawaited(_showSubscriptionRenewalReminder(_profiles)),
+    );
   }
 
   @override
@@ -219,6 +226,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _trafficFlushTimer?.cancel();
     _statusWatchdogTimer?.cancel();
     _uptimeTimer?.cancel();
+    _subscriptionReminderTimer?.cancel();
     _manualController.dispose();
     unawaited(_vpnEngine.dispose());
     super.dispose();
@@ -246,6 +254,11 @@ class _HomeScreenState extends State<HomeScreen> {
     });
     unawaited(_pingProfiles(profiles));
     unawaited(_resolveProfileCountries(profiles));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        unawaited(_showSubscriptionRenewalReminder(profiles));
+      }
+    });
   }
 
   Future<void> _initVpn() async {
@@ -504,29 +517,11 @@ class _HomeScreenState extends State<HomeScreen> {
         throw ProfileImportException(s.nothingToImport);
       }
 
-      final existingById = {
-        for (final profile in _profiles) profile.id: profile,
-      };
-      final importedWithCachedGeo = imported
-          .map((profile) {
-            final existing = existingById[profile.id];
-            if (existing == null) {
-              return profile;
-            }
-            return profile.copyWith(
-              countryCode: existing.countryCode,
-              countryName: existing.countryName,
-            );
-          })
-          .toList(growable: false);
-
-      final merged = <String, VpnProfile>{
-        for (final profile in _profiles) profile.id: profile,
-        for (final profile in importedWithCachedGeo) profile.id: profile,
-      }.values.toList();
+      final importedWithCachedData = _profilesWithCachedData(imported);
+      final merged = _mergeProfiles(importedWithCachedData);
 
       await _store.saveProfiles(merged);
-      await _store.saveSelectedProfileId(importedWithCachedGeo.first.id);
+      await _store.saveSelectedProfileId(importedWithCachedData.first.id);
       _manualController.clear();
 
       if (!mounted) {
@@ -534,14 +529,239 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       setState(() {
         _profiles = merged;
-        _selectedProfileId = importedWithCachedGeo.first.id;
-        _profileTab = _profileTabForKind(importedWithCachedGeo.first.kind);
+        _selectedProfileId = importedWithCachedData.first.id;
+        _profileTab = _profileTabForKind(importedWithCachedData.first.kind);
         _message = s.imported(imported.length);
       });
       unawaited(_pingProfiles(merged));
       unawaited(_resolveProfileCountries(merged));
+      unawaited(_showSubscriptionRenewalReminder(merged, force: true));
       _showSnack(s.importedProfiles(imported.length));
     });
+  }
+
+  List<VpnProfile> _profilesWithCachedData(List<VpnProfile> profiles) {
+    final existingById = {for (final profile in _profiles) profile.id: profile};
+
+    return profiles
+        .map((profile) {
+          final existing = existingById[profile.id];
+          if (existing == null) {
+            return profile;
+          }
+          return profile.copyWith(
+            subscriptionExpiresAt:
+                profile.subscriptionExpiresAt ?? existing.subscriptionExpiresAt,
+            countryCode: profile.countryCode ?? existing.countryCode,
+            countryName: profile.countryName ?? existing.countryName,
+          );
+        })
+        .toList(growable: false);
+  }
+
+  List<VpnProfile> _mergeProfiles(List<VpnProfile> profiles) {
+    return <String, VpnProfile>{
+      for (final profile in _profiles) profile.id: profile,
+      for (final profile in profiles) profile.id: profile,
+    }.values.toList();
+  }
+
+  List<String> _subscriptionSourcesFor(List<VpnProfile> profiles) {
+    final sources = <String>{};
+    for (final profile in profiles) {
+      final source = profile.originalInput.trim();
+      final uri = Uri.tryParse(source);
+      if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https')) {
+        sources.add(source);
+      }
+    }
+    return sources.toList(growable: false);
+  }
+
+  bool get _hasSubscriptionSources =>
+      _subscriptionSourcesFor(_profiles).isNotEmpty;
+
+  Future<void> _refreshSubscriptions() async {
+    if (_busy || _subscriptionRefreshBusy) {
+      return;
+    }
+
+    final sources = _subscriptionSourcesFor(_profiles);
+    if (sources.isEmpty) {
+      _showSnack(s.noSubscriptionsToRefresh);
+      return;
+    }
+
+    setState(() {
+      _subscriptionRefreshBusy = true;
+      _message = s.refreshingSubscriptions;
+    });
+
+    try {
+      final imported = <VpnProfile>[];
+      Object? lastError;
+      for (final source in sources) {
+        try {
+          imported.addAll(await _importer.importFromText(source));
+        } on Object catch (error) {
+          lastError = error;
+          _queueLog(
+            'Subscription refresh failed: ${_redactSensitive(source)} | '
+            '${_redactSensitive('$error')}',
+          );
+        }
+      }
+
+      if (imported.isEmpty) {
+        throw ProfileImportException(
+          s.subscriptionRefreshFailed(
+            _redactSensitive('${lastError ?? s.nothingToImport}'),
+          ),
+        );
+      }
+
+      final importedWithCachedData = _profilesWithCachedData(imported);
+      final merged = _mergeProfiles(importedWithCachedData);
+      final selectedId =
+          _selectedProfileId != null &&
+              merged.any((profile) => profile.id == _selectedProfileId)
+          ? _selectedProfileId
+          : (merged.isEmpty ? null : merged.first.id);
+
+      await _store.saveProfiles(merged);
+      await _store.saveSelectedProfileId(selectedId);
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _profiles = merged;
+        _selectedProfileId = selectedId;
+        _message = s.subscriptionsUpdated(importedWithCachedData.length);
+      });
+      unawaited(_pingProfiles(merged));
+      unawaited(_resolveProfileCountries(merged));
+      unawaited(_showSubscriptionRenewalReminder(merged, force: true));
+      _showSnack(s.subscriptionsUpdated(importedWithCachedData.length));
+    } on Object catch (error) {
+      final errorText = _redactSensitive('$error');
+      if (mounted) {
+        setState(() {
+          _lastError = errorText;
+          _message = errorText;
+        });
+        _showSnack(errorText);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _subscriptionRefreshBusy = false);
+      }
+    }
+  }
+
+  bool _subscriptionNeedsAttention(VpnProfile profile) {
+    final expiresAt = profile.subscriptionExpiresAt;
+    if (expiresAt == null) {
+      return false;
+    }
+
+    final remaining = expiresAt.toUtc().difference(DateTime.now().toUtc());
+    return remaining <= _subscriptionReminderWindow;
+  }
+
+  String? _subscriptionTileStatus(VpnProfile profile) {
+    if (profile.subscriptionExpiresAt == null) {
+      return null;
+    }
+    return s.subscriptionStatus(profile.subscriptionExpiresAt);
+  }
+
+  List<VpnProfile> _subscriptionReminderProfiles(List<VpnProfile> profiles) {
+    final warnedBySource = <String>{};
+    final due = <VpnProfile>[];
+    for (final profile in profiles) {
+      if (!_subscriptionNeedsAttention(profile)) {
+        continue;
+      }
+
+      final sourceKey = profile.originalInput.trim().isNotEmpty
+          ? profile.originalInput.trim()
+          : profile.id;
+      if (!warnedBySource.add(sourceKey)) {
+        continue;
+      }
+      due.add(profile);
+    }
+
+    due.sort((a, b) {
+      final left =
+          a.subscriptionExpiresAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final right =
+          b.subscriptionExpiresAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return left.compareTo(right);
+    });
+    return due;
+  }
+
+  Future<void> _showSubscriptionRenewalReminder(
+    List<VpnProfile> profiles, {
+    bool force = false,
+  }) async {
+    if (!mounted || profiles.isEmpty) {
+      return;
+    }
+
+    final due = _subscriptionReminderProfiles(profiles);
+    if (due.isEmpty) {
+      return;
+    }
+
+    final primary = due.first;
+    final expiresAt = primary.subscriptionExpiresAt;
+    if (expiresAt == null) {
+      return;
+    }
+
+    final localDay = DateTime.now()
+        .toLocal()
+        .toIso8601String()
+        .split('T')
+        .first;
+    final stamp =
+        '$localDay|${primary.originalInput.isEmpty ? primary.id : primary.originalInput}|${expiresAt.toUtc().toIso8601String()}';
+    if (!force && await _store.loadSubscriptionReminderStamp() == stamp) {
+      return;
+    }
+
+    final profileName = _profileDisplayName(primary);
+    final status = s.subscriptionStatus(expiresAt);
+    final body = due.length == 1
+        ? s.subscriptionReminderBody(profileName, status)
+        : s.subscriptionReminderMany(due.length, profileName, status);
+
+    await _store.saveSubscriptionReminderStamp(stamp);
+    _showSnack(body);
+
+    try {
+      await _vpnEngine.requestNotificationPermission().timeout(
+        _nativeShortTimeout,
+      );
+      final shown = await _vpnEngine
+          .showAppNotification(
+            title: s.subscriptionReminderTitle,
+            body: body,
+            id: 7039,
+          )
+          .timeout(_nativeShortTimeout);
+      if (!shown) {
+        _queueLog('Subscription reminder notification skipped: permission');
+      }
+    } on Object catch (error) {
+      _queueLog(
+        'Subscription reminder notification failed: '
+        '${_redactSensitive('$error')}',
+      );
+    }
   }
 
   Future<void> _toggleVpn() async {
@@ -2024,6 +2244,11 @@ class _HomeScreenState extends State<HomeScreen> {
               onCopy: selected == null ? null : _copySelected,
               onQr: selected == null ? null : _showQr,
               onDeleteProfile: (profile) => unawaited(_deleteProfile(profile)),
+              onRefreshSubscriptions: () => unawaited(_refreshSubscriptions()),
+              hasSubscriptionSources: _hasSubscriptionSources,
+              subscriptionRefreshBusy: _subscriptionRefreshBusy,
+              subscriptionStatus: _subscriptionTileStatus,
+              subscriptionNeedsAttention: _subscriptionNeedsAttention,
               kindLabel: _profileKindLabel,
               displayName: _profileDisplayName,
               countryFlag: _profileCountryFlag,
@@ -2342,6 +2567,11 @@ class _ProfilePanel extends StatelessWidget {
     required this.onCopy,
     required this.onQr,
     required this.onDeleteProfile,
+    required this.onRefreshSubscriptions,
+    required this.hasSubscriptionSources,
+    required this.subscriptionRefreshBusy,
+    required this.subscriptionStatus,
+    required this.subscriptionNeedsAttention,
     required this.kindLabel,
     required this.displayName,
     required this.countryFlag,
@@ -2361,6 +2591,11 @@ class _ProfilePanel extends StatelessWidget {
   final VoidCallback? onCopy;
   final VoidCallback? onQr;
   final ValueChanged<VpnProfile> onDeleteProfile;
+  final VoidCallback onRefreshSubscriptions;
+  final bool hasSubscriptionSources;
+  final bool subscriptionRefreshBusy;
+  final String? Function(VpnProfile profile) subscriptionStatus;
+  final bool Function(VpnProfile profile) subscriptionNeedsAttention;
   final String Function(VpnProfileKind kind) kindLabel;
   final String Function(VpnProfile profile) displayName;
   final String? Function(VpnProfile profile) countryFlag;
@@ -2384,6 +2619,18 @@ class _ProfilePanel extends StatelessWidget {
                 strings.profiles,
                 style: Theme.of(context).textTheme.titleMedium,
               ),
+            ),
+            IconButton(
+              tooltip: strings.refreshSubscriptions,
+              onPressed: hasSubscriptionSources && !subscriptionRefreshBusy
+                  ? onRefreshSubscriptions
+                  : null,
+              icon: subscriptionRefreshBusy
+                  ? const SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.sync),
             ),
             IconButton(
               tooltip: strings.refreshPing,
@@ -2431,6 +2678,9 @@ class _ProfilePanel extends StatelessWidget {
                 displayName: displayName(profile),
                 countryFlag: countryFlag(profile),
                 pingLabel: pingLabel(profile),
+                subscriptionStatus: subscriptionStatus(profile),
+                subscriptionNeedsAttention: subscriptionNeedsAttention(profile),
+                subscriptionLabel: strings.subscriptionLabel,
                 onPing: () => onPing(profile),
                 onDelete: () => onDeleteProfile(profile),
                 deleteTooltip: strings.delete,
@@ -2448,6 +2698,17 @@ class _ProfilePanel extends StatelessWidget {
           pingLabel: selectedProfile == null
               ? null
               : pingLabel(selectedProfile!),
+          subscriptionStatus: selectedProfile == null
+              ? null
+              : strings.subscriptionStatus(
+                  selectedProfile!.subscriptionExpiresAt,
+                ),
+          subscriptionNeedsAttention: selectedProfile == null
+              ? false
+              : subscriptionNeedsAttention(selectedProfile!),
+          canRefreshSubscriptions: hasSubscriptionSources,
+          subscriptionRefreshBusy: subscriptionRefreshBusy,
+          onRefreshSubscriptions: onRefreshSubscriptions,
           onPing: selectedProfile == null
               ? null
               : () => onPing(selectedProfile!),
@@ -2522,6 +2783,9 @@ class _ProfileTile extends StatelessWidget {
     required this.displayName,
     required this.countryFlag,
     required this.pingLabel,
+    required this.subscriptionStatus,
+    required this.subscriptionNeedsAttention,
+    required this.subscriptionLabel,
     required this.onPing,
     required this.onDelete,
     required this.deleteTooltip,
@@ -2534,6 +2798,9 @@ class _ProfileTile extends StatelessWidget {
   final String displayName;
   final String? countryFlag;
   final String pingLabel;
+  final String? subscriptionStatus;
+  final bool subscriptionNeedsAttention;
+  final String subscriptionLabel;
   final VoidCallback onPing;
   final VoidCallback onDelete;
   final String deleteTooltip;
@@ -2583,6 +2850,24 @@ class _ProfileTile extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(color: _mutedGold),
                   ),
+                  if (subscriptionStatus != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '$subscriptionLabel · $subscriptionStatus',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: subscriptionNeedsAttention
+                            ? _dangerSoft
+                            : _mutedGold,
+                        fontSize: 12,
+                        fontWeight: subscriptionNeedsAttention
+                            ? FontWeight.w700
+                            : FontWeight.w400,
+                        letterSpacing: 0,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -2657,6 +2942,11 @@ class _ProfileInsightPanel extends StatelessWidget {
     required this.kindLabel,
     required this.countryFlag,
     required this.pingLabel,
+    required this.subscriptionStatus,
+    required this.subscriptionNeedsAttention,
+    required this.canRefreshSubscriptions,
+    required this.subscriptionRefreshBusy,
+    required this.onRefreshSubscriptions,
     required this.onPing,
   });
 
@@ -2665,6 +2955,11 @@ class _ProfileInsightPanel extends StatelessWidget {
   final String Function(VpnProfileKind kind) kindLabel;
   final String? countryFlag;
   final String? pingLabel;
+  final String? subscriptionStatus;
+  final bool subscriptionNeedsAttention;
+  final bool canRefreshSubscriptions;
+  final bool subscriptionRefreshBusy;
+  final VoidCallback onRefreshSubscriptions;
   final VoidCallback? onPing;
 
   @override
@@ -2724,6 +3019,27 @@ class _ProfileInsightPanel extends StatelessWidget {
                         label: strings.stabilityLabel,
                         value: strings.stabilityValue,
                       ),
+                      _InsightRow(
+                        icon: Icons.event_available_outlined,
+                        label: strings.subscriptionLabel,
+                        value:
+                            subscriptionStatus ?? strings.subscriptionUnknown,
+                        valueColor: subscriptionNeedsAttention
+                            ? _dangerSoft
+                            : null,
+                        trailing: subscriptionRefreshBusy
+                            ? const SizedBox.square(
+                                dimension: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : null,
+                        onTap:
+                            canRefreshSubscriptions && !subscriptionRefreshBusy
+                            ? onRefreshSubscriptions
+                            : null,
+                      ),
                       if (countryFlag != null)
                         _InsightRow(
                           icon: Icons.flag_outlined,
@@ -2771,12 +3087,16 @@ class _InsightRow extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.value,
+    this.valueColor,
+    this.trailing,
     this.onTap,
   });
 
   final IconData icon;
   final String label;
   final String value;
+  final Color? valueColor;
+  final Widget? trailing;
   final VoidCallback? onTap;
 
   @override
@@ -2806,10 +3126,13 @@ class _InsightRow extends StatelessWidget {
                 color: _goldSoft,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0,
-              ),
+              ).copyWith(color: valueColor),
             ),
           ),
-          if (onTap != null) ...[
+          if (trailing != null) ...[
+            const SizedBox(width: 6),
+            trailing!,
+          ] else if (onTap != null) ...[
             const SizedBox(width: 6),
             const Icon(Icons.refresh, color: _mutedGold, size: 16),
           ],
@@ -3192,6 +3515,10 @@ class _Strings {
     required this.subscriptionLabel,
     required this.subscriptionUnknown,
     required this.subscriptionExpired,
+    required this.refreshSubscriptions,
+    required this.refreshingSubscriptions,
+    required this.noSubscriptionsToRefresh,
+    required this.subscriptionReminderTitle,
     required this.mobileReady,
     required this.mobileNetworkAdvice,
     required this.androidVpnVisibleNote,
@@ -3269,6 +3596,10 @@ class _Strings {
   final String subscriptionLabel;
   final String subscriptionUnknown;
   final String subscriptionExpired;
+  final String refreshSubscriptions;
+  final String refreshingSubscriptions;
+  final String noSubscriptionsToRefresh;
+  final String subscriptionReminderTitle;
   final String mobileReady;
   final String mobileNetworkAdvice;
   final String androidVpnVisibleNote;
@@ -3313,6 +3644,32 @@ class _Strings {
   String importedProfiles(int count) => switch (this) {
     _Strings.en => 'Profiles imported: $count',
     _ => 'Импортировано профилей: $count',
+  };
+
+  String subscriptionsUpdated(int count) => switch (this) {
+    _Strings.en => 'Subscriptions updated: $count profiles',
+    _ => 'Подписки обновлены: $count профилей',
+  };
+
+  String subscriptionRefreshFailed(String error) => switch (this) {
+    _Strings.en => 'Subscription update failed: $error',
+    _ => 'Обновление подписок не удалось: $error',
+  };
+
+  String subscriptionReminderBody(String profileName, String status) =>
+      switch (this) {
+        _Strings.en => '$profileName: $status. Time to renew the subscription.',
+        _ => '$profileName: $status. Пора продлить подписку.',
+      };
+
+  String subscriptionReminderMany(
+    int count,
+    String profileName,
+    String status,
+  ) => switch (this) {
+    _Strings.en =>
+      '$count subscriptions need attention. First: $profileName, $status.',
+    _ => '$count подписки требуют внимания. Первая: $profileName, $status.',
   };
 
   String profileTabLabel(_ProfileTab tab, int count) {
@@ -3494,6 +3851,10 @@ class _Strings {
     subscriptionLabel: 'Подписка',
     subscriptionUnknown: 'Срок не указан',
     subscriptionExpired: 'Истекла',
+    refreshSubscriptions: 'Обновить подписки',
+    refreshingSubscriptions: 'Обновляю подписки...',
+    noSubscriptionsToRefresh: 'Нет подписок для обновления.',
+    subscriptionReminderTitle: 'Пора продлить подписку',
     mobileReady: 'Wi‑Fi / LTE',
     mobileNetworkAdvice:
         'Wi‑Fi/LTE: строгий TUN, FakeIP и DNS через выбранный профиль; keeper перепроверяет туннель без открытия приложения.',
@@ -3610,6 +3971,10 @@ class _Strings {
     subscriptionLabel: 'Subscription',
     subscriptionUnknown: 'Not provided',
     subscriptionExpired: 'Expired',
+    refreshSubscriptions: 'Refresh subscriptions',
+    refreshingSubscriptions: 'Refreshing subscriptions...',
+    noSubscriptionsToRefresh: 'No subscriptions to refresh.',
+    subscriptionReminderTitle: 'Subscription renewal',
     mobileReady: 'Wi‑Fi / LTE',
     mobileNetworkAdvice:
         'Wi-Fi/LTE: strict TUN, FakeIP, DNS through the selected profile, and a background keeper that checks the tunnel without opening the app.',

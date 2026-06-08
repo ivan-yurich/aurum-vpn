@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.39 - 2026-06-08
+
+- Added subscription refresh from saved HTTP/HTTPS subscription sources.
+- Profile cards and the profile/network panel now show the remaining
+  subscription time when the provider sends expiration metadata.
+- Added renewal reminders for subscriptions that are expired or have 5 days or
+  less remaining, with an in-app message and Android notification when allowed.
+- Preserved cached country metadata and existing expiration data during repeated
+  subscription imports.
+
 ## 1.0.38 - 2026-06-08
 
 - Added profile country detection and cached country metadata.

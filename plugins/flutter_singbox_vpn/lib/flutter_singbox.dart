@@ -166,6 +166,19 @@ class FlutterSingbox {
   Future<bool> requestNotificationPermission() {
     return FlutterSingboxPlatform.instance.requestNotificationPermission();
   }
+
+  /// Show a one-shot app notification.
+  Future<bool> showAppNotification({
+    required String title,
+    required String body,
+    int id = 7001,
+  }) {
+    return FlutterSingboxPlatform.instance.showAppNotification(
+      title: title,
+      body: body,
+      id: id,
+    );
+  }
 }
 
 /// Helper class for VPN Status

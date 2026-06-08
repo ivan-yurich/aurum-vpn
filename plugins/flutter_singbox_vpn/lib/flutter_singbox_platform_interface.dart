@@ -139,4 +139,13 @@ abstract class FlutterSingboxPlatform extends PlatformInterface {
       'requestNotificationPermission() has not been implemented.',
     );
   }
+
+  /// Show a one-shot app notification.
+  Future<bool> showAppNotification({
+    required String title,
+    required String body,
+    int id = 7001,
+  }) {
+    throw UnimplementedError('showAppNotification() has not been implemented.');
+  }
 }

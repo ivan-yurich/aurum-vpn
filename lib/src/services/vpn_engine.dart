@@ -22,6 +22,11 @@ abstract class VpnEngine {
   Future<bool> setNotificationDescription(String description);
   Future<String> getNotificationDescription();
   Future<bool> requestNotificationPermission();
+  Future<bool> showAppNotification({
+    required String title,
+    required String body,
+    int id,
+  });
   Future<String> getVPNStatus();
   Future<bool> saveConfig(String config);
   Future<String> getConfig();

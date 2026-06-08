@@ -46,6 +46,15 @@ class AndroidVpnEngine implements VpnEngine {
   }
 
   @override
+  Future<bool> showAppNotification({
+    required String title,
+    required String body,
+    int id = 7001,
+  }) {
+    return _singBox.showAppNotification(title: title, body: body, id: id);
+  }
+
+  @override
   Future<String> getVPNStatus() => _singBox.getVPNStatus();
 
   @override

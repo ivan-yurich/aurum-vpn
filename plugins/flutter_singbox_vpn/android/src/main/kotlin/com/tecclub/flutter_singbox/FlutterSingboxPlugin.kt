@@ -3,7 +3,9 @@ package com.tecclub.flutter_singbox
 import android.Manifest
 import android.app.Activity
 import android.app.ActivityManager
+import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.ClipboardManager
 import android.content.Context
@@ -165,6 +167,8 @@ class ApplicationHelper {
         }
     }
 }
+
+private const val APP_ALERT_CHANNEL_ID = "yurich_connect_alerts"
 
 /** FlutterSingboxPlugin */
 class FlutterSingboxPlugin :
@@ -679,6 +683,12 @@ class FlutterSingboxPlugin :
             "requestNotificationPermission" -> {
                 requestNotificationPermission(result)
             }
+            "showAppNotification" -> {
+                val title = call.argument<String>("title") ?: "Yurich Connect"
+                val body = call.argument<String>("body") ?: ""
+                val id = call.argument<Int>("id") ?: 7001
+                showAppNotification(title, body, id, result)
+            }
             "getNotificationTitle" -> {
                 getNotificationTitle(result)
             }
@@ -754,6 +764,81 @@ class FlutterSingboxPlugin :
         } catch (e: Exception) {
             result.error("NOTIFICATION_PERMISSION_ERROR", e.message, null)
         }
+    }
+
+    private fun showAppNotification(title: String, body: String, id: Int, result: Result) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                result.success(false)
+                return
+            }
+
+            ensureAppAlertChannel()
+
+            val launchIntent = context.packageManager
+                .getLaunchIntentForPackage(context.packageName)
+                ?.apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                }
+
+            val pendingIntent = launchIntent?.let {
+                PendingIntent.getActivity(
+                    context,
+                    7001,
+                    it,
+                    PendingIntent.FLAG_UPDATE_CURRENT or
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            PendingIntent.FLAG_IMMUTABLE
+                        } else {
+                            0
+                        }
+                )
+            }
+
+            val notification = NotificationCompat.Builder(context, APP_ALERT_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_notification_shield)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setAutoCancel(true)
+                .apply {
+                    if (pendingIntent != null) {
+                        setContentIntent(pendingIntent)
+                    }
+                }
+                .build()
+
+            NotificationManagerCompat.from(context).notify(id, notification)
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("APP_NOTIFICATION_ERROR", e.message, null)
+        }
+    }
+
+    private fun ensureAppAlertChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return
+        }
+
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (manager.getNotificationChannel(APP_ALERT_CHANNEL_ID) != null) {
+            return
+        }
+
+        val channel = NotificationChannel(
+            APP_ALERT_CHANNEL_ID,
+            "Yurich Connect Alerts",
+            NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            description = "Subscription and account reminders"
+        }
+        manager.createNotificationChannel(channel)
     }
     
     private var configContent: String? = null

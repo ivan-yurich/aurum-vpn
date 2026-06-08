@@ -214,4 +214,17 @@ class MethodChannelFlutterSingbox extends FlutterSingboxPlatform {
     );
     return result ?? false;
   }
+
+  @override
+  Future<bool> showAppNotification({
+    required String title,
+    required String body,
+    int id = 7001,
+  }) async {
+    final result = await methodChannel.invokeMethod<bool>(
+      'showAppNotification',
+      {'title': title, 'body': body, 'id': id},
+    );
+    return result ?? false;
+  }
 }
