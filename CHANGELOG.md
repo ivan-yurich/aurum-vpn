@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.41 - 2026-06-08
+
+- Preserved the original HTTP/HTTPS subscription source for imported profile
+  lists such as `/s/.../links.txt`, while keeping each profile's own protocol
+  link for QR/copy/manual use.
+- Made the subscription refresh button useful for existing installs: if old
+  profiles do not yet know their source URL, the app opens the import dialog and
+  asks to paste the subscription link once.
+- Added a regression test for raw `links.txt` subscriptions with multiple
+  profile links and expiration metadata.
+
 ## 1.0.40 - 2026-06-08
 
 - Hardened the in-app updater against GitHub `HTTP 504` and other temporary

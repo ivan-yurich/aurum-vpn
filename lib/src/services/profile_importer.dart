@@ -151,24 +151,29 @@ class ProfileImporter {
 
     final jsonProfile = _tryParseJsonConfig(text, source: source);
     if (jsonProfile != null) {
-      return _withSubscriptionExpiresAt([jsonProfile], detectedExpiresAt);
+      return _withSubscriptionMetadata(
+        [jsonProfile],
+        detectedExpiresAt,
+        source,
+      );
     }
 
     final jsonLinks = _tryParseJsonLinks(text);
     if (jsonLinks.isNotEmpty) {
-      return _withSubscriptionExpiresAt(jsonLinks, detectedExpiresAt);
+      return _withSubscriptionMetadata(jsonLinks, detectedExpiresAt, source);
     }
 
     final xrayProfiles = _tryParseXrayConfigs(text);
     if (xrayProfiles.isNotEmpty) {
-      return _withSubscriptionExpiresAt(xrayProfiles, detectedExpiresAt);
+      return _withSubscriptionMetadata(xrayProfiles, detectedExpiresAt, source);
     }
 
     final links = _extractLinks(text);
     if (links.isNotEmpty) {
-      return _withSubscriptionExpiresAt(
+      return _withSubscriptionMetadata(
         _profilesFromLinks(links),
         detectedExpiresAt,
+        source,
       );
     }
 
@@ -179,29 +184,37 @@ class ProfileImporter {
 
       final decodedJsonProfile = _tryParseJsonConfig(decoded, source: source);
       if (decodedJsonProfile != null) {
-        return _withSubscriptionExpiresAt([
-          decodedJsonProfile,
-        ], decodedExpiresAt);
+        return _withSubscriptionMetadata(
+          [decodedJsonProfile],
+          decodedExpiresAt,
+          source,
+        );
       }
 
       final decodedJsonLinks = _tryParseJsonLinks(decoded);
       if (decodedJsonLinks.isNotEmpty) {
-        return _withSubscriptionExpiresAt(decodedJsonLinks, decodedExpiresAt);
+        return _withSubscriptionMetadata(
+          decodedJsonLinks,
+          decodedExpiresAt,
+          source,
+        );
       }
 
       final decodedXrayProfiles = _tryParseXrayConfigs(decoded);
       if (decodedXrayProfiles.isNotEmpty) {
-        return _withSubscriptionExpiresAt(
+        return _withSubscriptionMetadata(
           decodedXrayProfiles,
           decodedExpiresAt,
+          source,
         );
       }
 
       final decodedLinks = _extractLinks(decoded);
       if (decodedLinks.isNotEmpty) {
-        return _withSubscriptionExpiresAt(
+        return _withSubscriptionMetadata(
           _profilesFromLinks(decodedLinks),
           decodedExpiresAt,
+          source,
         );
       }
     }
@@ -333,17 +346,29 @@ class ProfileImporter {
     return DateTime.fromMillisecondsSinceEpoch(milliseconds, isUtc: true);
   }
 
-  List<VpnProfile> _withSubscriptionExpiresAt(
+  List<VpnProfile> _withSubscriptionMetadata(
     List<VpnProfile> profiles,
     DateTime? expiresAt,
+    String source,
   ) {
-    if (expiresAt == null) {
+    final subscriptionSource = _isHttpSource(source) ? source : null;
+    if (expiresAt == null && subscriptionSource == null) {
       return profiles;
     }
 
     return profiles
-        .map((profile) => profile.copyWith(subscriptionExpiresAt: expiresAt))
+        .map(
+          (profile) => profile.copyWith(
+            subscriptionExpiresAt: expiresAt,
+            subscriptionSource: subscriptionSource,
+          ),
+        )
         .toList(growable: false);
+  }
+
+  bool _isHttpSource(String source) {
+    final uri = Uri.tryParse(source.trim());
+    return uri != null && (uri.scheme == 'http' || uri.scheme == 'https');
   }
 
   VpnProfile? _tryParseJsonConfig(String text, {required String source}) {

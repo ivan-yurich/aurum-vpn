@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -418,6 +419,33 @@ void main() {
       VpnProfile.fromJson(profile.toJson()).subscriptionExpiresAt,
       profile.subscriptionExpiresAt,
     );
+  });
+
+  test('keeps HTTP subscription source separate from profile links', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    unawaited(
+      server.first.then((request) {
+        request.response.headers.set(
+          'subscription-userinfo',
+          'upload=0; download=0; total=0; expire=1893456000',
+        );
+        request.response.write(
+          'naive+https://user:pass@example.com:443#Naive\n'
+          'vless://11111111-1111-4111-8111-111111111111@example.com:443?security=reality&pbk=abc123#Reality',
+        );
+        return request.response.close();
+      }),
+    );
+    final source =
+        'http://${server.address.host}:${server.port}/s/token/links.txt';
+
+    final profiles = await ProfileImporter().importFromText(source);
+
+    expect(profiles, hasLength(2));
+    expect(profiles.first.subscriptionSource, source);
+    expect(profiles.first.originalInput, startsWith('naive+https://'));
+    expect(profiles.first.subscriptionExpiresAt, isNotNull);
   });
 
   test('imports Remnawave Xray JSON subscription', () async {

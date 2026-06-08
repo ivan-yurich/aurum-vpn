@@ -29,7 +29,7 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.40';
+const _appVersion = '1.0.41';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
@@ -552,6 +552,8 @@ class _HomeScreenState extends State<HomeScreen> {
           return profile.copyWith(
             subscriptionExpiresAt:
                 profile.subscriptionExpiresAt ?? existing.subscriptionExpiresAt,
+            subscriptionSource:
+                profile.subscriptionSource ?? existing.subscriptionSource,
             countryCode: profile.countryCode ?? existing.countryCode,
             countryName: profile.countryName ?? existing.countryName,
           );
@@ -569,7 +571,8 @@ class _HomeScreenState extends State<HomeScreen> {
   List<String> _subscriptionSourcesFor(List<VpnProfile> profiles) {
     final sources = <String>{};
     for (final profile in profiles) {
-      final source = profile.originalInput.trim();
+      final source = (profile.subscriptionSource ?? profile.originalInput)
+          .trim();
       final uri = Uri.tryParse(source);
       if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https')) {
         sources.add(source);
@@ -577,9 +580,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     return sources.toList(growable: false);
   }
-
-  bool get _hasSubscriptionSources =>
-      _subscriptionSourcesFor(_profiles).isNotEmpty;
 
   Future<void> _refreshSubscriptions() async {
     if (_busy || _subscriptionRefreshBusy) {
@@ -589,6 +589,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final sources = _subscriptionSourcesFor(_profiles);
     if (sources.isEmpty) {
       _showSnack(s.noSubscriptionsToRefresh);
+      unawaited(_showImportSheet());
       return;
     }
 
@@ -684,9 +685,9 @@ class _HomeScreenState extends State<HomeScreen> {
         continue;
       }
 
-      final sourceKey = profile.originalInput.trim().isNotEmpty
-          ? profile.originalInput.trim()
-          : profile.id;
+      final source = (profile.subscriptionSource ?? profile.originalInput)
+          .trim();
+      final sourceKey = source.isNotEmpty ? source : profile.id;
       if (!warnedBySource.add(sourceKey)) {
         continue;
       }
@@ -728,7 +729,7 @@ class _HomeScreenState extends State<HomeScreen> {
         .split('T')
         .first;
     final stamp =
-        '$localDay|${primary.originalInput.isEmpty ? primary.id : primary.originalInput}|${expiresAt.toUtc().toIso8601String()}';
+        '$localDay|${primary.subscriptionSource ?? (primary.originalInput.isEmpty ? primary.id : primary.originalInput)}|${expiresAt.toUtc().toIso8601String()}';
     if (!force && await _store.loadSubscriptionReminderStamp() == stamp) {
       return;
     }
@@ -2245,7 +2246,7 @@ class _HomeScreenState extends State<HomeScreen> {
               onQr: selected == null ? null : _showQr,
               onDeleteProfile: (profile) => unawaited(_deleteProfile(profile)),
               onRefreshSubscriptions: () => unawaited(_refreshSubscriptions()),
-              hasSubscriptionSources: _hasSubscriptionSources,
+              hasSubscriptionSources: _profiles.isNotEmpty,
               subscriptionRefreshBusy: _subscriptionRefreshBusy,
               subscriptionStatus: _subscriptionTileStatus,
               subscriptionNeedsAttention: _subscriptionNeedsAttention,
@@ -3853,7 +3854,8 @@ class _Strings {
     subscriptionExpired: 'Истекла',
     refreshSubscriptions: 'Обновить подписки',
     refreshingSubscriptions: 'Обновляю подписки...',
-    noSubscriptionsToRefresh: 'Нет подписок для обновления.',
+    noSubscriptionsToRefresh:
+        'Не нашёл исходную ссылку подписки. Вставь https://.../links.txt один раз.',
     subscriptionReminderTitle: 'Пора продлить подписку',
     mobileReady: 'Wi‑Fi / LTE',
     mobileNetworkAdvice:
@@ -3973,7 +3975,8 @@ class _Strings {
     subscriptionExpired: 'Expired',
     refreshSubscriptions: 'Refresh subscriptions',
     refreshingSubscriptions: 'Refreshing subscriptions...',
-    noSubscriptionsToRefresh: 'No subscriptions to refresh.',
+    noSubscriptionsToRefresh:
+        'No saved subscription source. Paste the https://.../links.txt URL once.',
     subscriptionReminderTitle: 'Subscription renewal',
     mobileReady: 'Wi‑Fi / LTE',
     mobileNetworkAdvice:
