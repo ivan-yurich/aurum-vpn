@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.42 - 2026-06-08
+
+- Added subscription expiration parsing from profile names, including provider
+  labels such as `до 08.06.2027`, `until 08-06-2027`, `expire`, `expires`, and
+  `expiry`.
+- Kept server-provided subscription metadata as the priority source when
+  `subscription-userinfo` headers or JSON expiration fields are available.
+- Added a regression test for Yurich/links-style profile names with embedded
+  subscription dates.
+
 ## 1.0.41 - 2026-06-08
 
 - Preserved the original HTTP/HTTPS subscription source for imported profile

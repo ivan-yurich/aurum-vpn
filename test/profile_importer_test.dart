@@ -421,6 +421,22 @@ void main() {
     );
   });
 
+  test('imports subscription expiration from profile name', () async {
+    const raw =
+        'naive+https://user:pass@example.com:443#%F0%9F%87%AB%F0%9F%87%AE%20Finland%20%E2%80%A2%20%D0%B4%D0%BE%2008.06.2027%20%E2%80%A2%20Yurich%20Proxy\n'
+        'hy2://pass@example.com:8443?insecure=1#Germany%20until%2009-06-2027';
+
+    final profiles = await ProfileImporter().importFromText(raw);
+
+    expect(profiles, hasLength(2));
+    expect(profiles.first.subscriptionExpiresAt, isNotNull);
+    expect(profiles.first.subscriptionExpiresAt!.toLocal().year, 2027);
+    expect(profiles.first.subscriptionExpiresAt!.toLocal().month, 6);
+    expect(profiles.first.subscriptionExpiresAt!.toLocal().day, 8);
+    expect(profiles.last.subscriptionExpiresAt, isNotNull);
+    expect(profiles.last.subscriptionExpiresAt!.toLocal().day, 9);
+  });
+
   test('keeps HTTP subscription source separate from profile links', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() => server.close(force: true));

@@ -353,13 +353,22 @@ class ProfileImporter {
   ) {
     final subscriptionSource = _isHttpSource(source) ? source : null;
     if (expiresAt == null && subscriptionSource == null) {
-      return profiles;
+      return profiles
+          .map(
+            (profile) => profile.copyWith(
+              subscriptionExpiresAt: _subscriptionExpiresAtFromName(
+                profile.name,
+              ),
+            ),
+          )
+          .toList(growable: false);
     }
 
     return profiles
         .map(
           (profile) => profile.copyWith(
-            subscriptionExpiresAt: expiresAt,
+            subscriptionExpiresAt:
+                expiresAt ?? _subscriptionExpiresAtFromName(profile.name),
             subscriptionSource: subscriptionSource,
           ),
         )
@@ -369,6 +378,34 @@ class ProfileImporter {
   bool _isHttpSource(String source) {
     final uri = Uri.tryParse(source.trim());
     return uri != null && (uri.scheme == 'http' || uri.scheme == 'https');
+  }
+
+  DateTime? _subscriptionExpiresAtFromName(String name) {
+    final match = RegExp(
+      r'(?:до|until|expire|expires|expiry)\s*[:=]?\s*(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})',
+      caseSensitive: false,
+    ).firstMatch(name);
+    if (match == null) {
+      return null;
+    }
+
+    final day = int.tryParse(match.group(1)!);
+    final month = int.tryParse(match.group(2)!);
+    final rawYear = int.tryParse(match.group(3)!);
+    if (day == null || month == null || rawYear == null) {
+      return null;
+    }
+
+    final year = rawYear < 100 ? 2000 + rawYear : rawYear;
+    if (month < 1 || month > 12 || day < 1 || day > 31) {
+      return null;
+    }
+
+    final localEndOfDay = DateTime(year, month, day, 23, 59, 59);
+    if (localEndOfDay.day != day || localEndOfDay.month != month) {
+      return null;
+    }
+    return localEndOfDay.toUtc();
   }
 
   VpnProfile? _tryParseJsonConfig(String text, {required String source}) {
