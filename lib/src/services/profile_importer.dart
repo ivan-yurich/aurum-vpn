@@ -352,27 +352,24 @@ class ProfileImporter {
     String source,
   ) {
     final subscriptionSource = _isHttpSource(source) ? source : null;
-    if (expiresAt == null && subscriptionSource == null) {
-      return profiles
-          .map(
-            (profile) => profile.copyWith(
-              subscriptionExpiresAt: _subscriptionExpiresAtFromName(
-                profile.name,
-              ),
-            ),
-          )
-          .toList(growable: false);
+    final nameExpiresAt = [
+      for (final profile in profiles)
+        _subscriptionExpiresAtFromName(profile.name),
+    ];
+    final fallbackExpiresAt =
+        expiresAt ?? _fallbackSubscriptionExpiresAt(nameExpiresAt);
+    if (fallbackExpiresAt == null && subscriptionSource == null) {
+      return profiles;
     }
 
-    return profiles
-        .map(
-          (profile) => profile.copyWith(
-            subscriptionExpiresAt:
-                expiresAt ?? _subscriptionExpiresAtFromName(profile.name),
-            subscriptionSource: subscriptionSource,
-          ),
-        )
-        .toList(growable: false);
+    return [
+      for (var index = 0; index < profiles.length; index += 1)
+        profiles[index].copyWith(
+          subscriptionExpiresAt:
+              expiresAt ?? nameExpiresAt[index] ?? fallbackExpiresAt,
+          subscriptionSource: subscriptionSource,
+        ),
+    ];
   }
 
   bool _isHttpSource(String source) {
@@ -381,21 +378,66 @@ class ProfileImporter {
   }
 
   DateTime? _subscriptionExpiresAtFromName(String name) {
-    final match = RegExp(
-      r'(?:до|until|expire|expires|expiry)\s*[:=]?\s*(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})',
+    final dayFirstMatch = RegExp(
+      r'(?:до|until|expire|expires|expiry)\s*[:=\-]?\s*(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{2,4})',
       caseSensitive: false,
     ).firstMatch(name);
-    if (match == null) {
+    if (dayFirstMatch != null) {
+      return _subscriptionDateFromParts(
+        day: dayFirstMatch.group(1)!,
+        month: dayFirstMatch.group(2)!,
+        year: dayFirstMatch.group(3)!,
+      );
+    }
+
+    final yearFirstMatch = RegExp(
+      r'(?:до|until|expire|expires|expiry)\s*[:=\-]?\s*(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})',
+      caseSensitive: false,
+    ).firstMatch(name);
+    if (yearFirstMatch == null) {
       return null;
     }
 
-    final day = int.tryParse(match.group(1)!);
-    final month = int.tryParse(match.group(2)!);
-    final rawYear = int.tryParse(match.group(3)!);
-    if (day == null || month == null || rawYear == null) {
+    return _subscriptionDateFromParts(
+      day: yearFirstMatch.group(3)!,
+      month: yearFirstMatch.group(2)!,
+      year: yearFirstMatch.group(1)!,
+    );
+  }
+
+  DateTime? _fallbackSubscriptionExpiresAt(List<DateTime?> values) {
+    final dates = values.whereType<DateTime>().toList();
+    if (dates.isEmpty) {
+      return null;
+    }
+    dates.sort();
+    return dates.first;
+  }
+
+  DateTime? _subscriptionDateFromParts({
+    required String day,
+    required String month,
+    required String year,
+  }) {
+    final parsedDay = int.tryParse(day);
+    final parsedMonth = int.tryParse(month);
+    final rawYear = int.tryParse(year);
+    if (parsedDay == null || parsedMonth == null || rawYear == null) {
       return null;
     }
 
+    return _subscriptionDateFromNumbers(
+      day: parsedDay,
+      month: parsedMonth,
+      rawYear: rawYear,
+    );
+  }
+
+  DateTime? _subscriptionDateFromNumbers({
+    required int day,
+    required int month,
+    required int rawYear,
+  }) {
     final year = rawYear < 100 ? 2000 + rawYear : rawYear;
     if (month < 1 || month > 12 || day < 1 || day > 31) {
       return null;

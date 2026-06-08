@@ -437,6 +437,28 @@ void main() {
     expect(profiles.last.subscriptionExpiresAt!.toLocal().day, 9);
   });
 
+  test(
+    'applies subscription expiration from one profile name to whole list',
+    () async {
+      const raw =
+          'naive+https://user:pass@example.com:443#net-it.pro\n'
+          'hy2://pass@example.com:8443?insecure=1#ivan-hy2-until-2027-06-08';
+
+      final profiles = await ProfileImporter().importFromText(raw);
+
+      expect(profiles, hasLength(2));
+      expect(profiles.first.name, 'net-it.pro');
+      expect(profiles.first.subscriptionExpiresAt, isNotNull);
+      expect(
+        profiles.first.subscriptionExpiresAt,
+        profiles.last.subscriptionExpiresAt,
+      );
+      expect(profiles.first.subscriptionExpiresAt!.toLocal().year, 2027);
+      expect(profiles.first.subscriptionExpiresAt!.toLocal().month, 6);
+      expect(profiles.first.subscriptionExpiresAt!.toLocal().day, 8);
+    },
+  );
+
   test('keeps HTTP subscription source separate from profile links', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     addTearDown(() => server.close(force: true));

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.43 - 2026-06-08
+
+- Improved subscription expiration detection for profile lists where only some
+  profile names contain a date.
+- Added support for year-first labels such as `until-2027-06-08`.
+- When one profile in the same subscription carries the expiration date, the app
+  now applies that date to sibling profiles that do not include it in their own
+  name.
+
 ## 1.0.42 - 2026-06-08
 
 - Added subscription expiration parsing from profile names, including provider
