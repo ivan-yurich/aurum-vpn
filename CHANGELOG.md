@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.44 - 2026-06-08
+
+- Made NaiveProxy startup tolerant to false-negative tunnel probes: when
+  sing-box reports `Started`, the app no longer immediately stops the VPN only
+  because the first internet probe failed.
+- Startup probe failures now mark the connection as degraded and schedule a
+  quick watchdog recheck, allowing real traffic to confirm the tunnel or the
+  keeper to reconnect if the failure is real.
+- This reduces cases where NaiveProxy briefly starts, passes traffic, but the
+  app shuts it down with "VPN started, but tunnel probe failed".
+
 ## 1.0.43 - 2026-06-08
 
 - Improved subscription expiration detection for profile lists where only some

@@ -29,12 +29,13 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.43';
+const _appVersion = '1.0.44';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
 const _subscriptionReminderWindow = Duration(days: 5);
 const _tunnelHealthProbeInterval = Duration(seconds: 105);
+const _startupProbeRecheckDelay = Duration(seconds: 8);
 const _recentTrafficGrace = Duration(seconds: 120);
 const _tunnelHealthFailureThreshold = 4;
 const _autoReconnectMaxAttempts = 6;
@@ -842,6 +843,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     Object? lastStartError;
     var connected = false;
+    var startupProbeDegraded = false;
     final plans = _connectionPlans(profile);
 
     for (
@@ -904,7 +906,13 @@ class _HomeScreenState extends State<HomeScreen> {
               connected = true;
               break;
             } else {
-              lastStartError = s.connectionProbeFailed;
+              startupProbeDegraded = true;
+              connected = true;
+              _queueLog(
+                'Naive startup probe did not pass after VPN status Started; '
+                'keeping tunnel alive and handing off to watchdog.',
+              );
+              break;
             }
           } else {
             lastStartError = s.vpnNotConnected(finalStatus);
@@ -947,15 +955,19 @@ class _HomeScreenState extends State<HomeScreen> {
         _lastError = null;
         _autoReconnectAttempts = 0;
         _nextAutoReconnectAt = null;
-        _tunnelHealthFailures = 0;
+        _tunnelHealthFailures = startupProbeDegraded
+            ? _tunnelHealthFailureThreshold - 1
+            : 0;
         _autoRecoveryArmed = true;
         _connectedSince ??= DateTime.now();
         _clockNow = DateTime.now();
         _lastTrafficAt = DateTime.now();
-        _lastHealthyAt = DateTime.now();
+        _lastHealthyAt = startupProbeDegraded ? null : DateTime.now();
         _lastSessionTrafficBytes = 0;
         _nextTunnelHealthCheckAt = DateTime.now().add(
-          _tunnelHealthProbeInterval,
+          startupProbeDegraded
+              ? _startupProbeRecheckDelay
+              : _tunnelHealthProbeInterval,
         );
         _message = s.connectionProfile(profile.name);
       });
