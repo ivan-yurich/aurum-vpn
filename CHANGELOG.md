@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.40 - 2026-06-08
+
+- Hardened the in-app updater against GitHub `HTTP 504` and other temporary
+  network failures.
+- Added retries with backoff for both update metadata and APK downloads.
+- Added a fallback discovery path through GitHub `/releases/latest` when the
+  GitHub JSON API is temporarily unavailable.
+- Added direct release download fallbacks for `YurichConnect-android-release.apk`.
+
 ## 1.0.39 - 2026-06-08
 
 - Added subscription refresh from saved HTTP/HTTPS subscription sources.

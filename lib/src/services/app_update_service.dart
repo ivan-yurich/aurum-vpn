@@ -8,6 +8,14 @@ const _releaseApiUrls = [
   'https://ivan-it.net/yurich-connect/android/latest.json',
   'https://api.github.com/repos/ivan-yurich/Yurich-Connect-Android/releases/latest',
 ];
+const _githubRepository = 'ivan-yurich/Yurich-Connect-Android';
+const _githubReleaseAssetName = 'YurichConnect-android-release.apk';
+const _updaterUserAgent = 'YurichConnect-Updater';
+const _updateRetryDelays = [
+  Duration(seconds: 1),
+  Duration(seconds: 3),
+  Duration(seconds: 6),
+];
 
 class AppUpdateInfo {
   const AppUpdateInfo({
@@ -15,12 +23,23 @@ class AppUpdateInfo {
     required this.assetName,
     required this.downloadUrl,
     required this.size,
+    this.fallbackDownloadUrls = const [],
   });
 
   final String version;
   final String assetName;
   final Uri downloadUrl;
   final int? size;
+  final List<Uri> fallbackDownloadUrls;
+}
+
+class _UpdateHttpException implements Exception {
+  const _UpdateHttpException(this.statusCode);
+
+  final int statusCode;
+
+  @override
+  String toString() => 'HTTP $statusCode';
 }
 
 class AppUpdatePermissionException implements Exception {
@@ -70,6 +89,17 @@ class AppUpdateService {
       }
     }
 
+    try {
+      final release = await _fetchLatestGitHubReleaseViaRedirect(supportedAbis);
+      if (release != null) {
+        return _isVersionNewer(release.version, currentVersion)
+            ? release
+            : null;
+      }
+    } on Object catch (error) {
+      lastError = error;
+    }
+
     if (lastError != null && !sawEmptyEndpoint) {
       throw StateError('$lastError');
     }
@@ -84,12 +114,53 @@ class AppUpdateService {
     final file = File(
       '${tempDir.path}${Platform.pathSeparator}${update.assetName}',
     );
-    final request = await _client.getUrl(update.downloadUrl);
-    request.headers.set(HttpHeaders.userAgentHeader, 'YurichConnect-Updater');
+
+    Object? lastError;
+    final urls = <Uri>{
+      update.downloadUrl,
+      ...update.fallbackDownloadUrls,
+      ..._githubDownloadUrls(update.version, update.assetName),
+    }.toList(growable: false);
+
+    for (final url in urls) {
+      for (var attempt = 0; attempt < _updateRetryDelays.length; attempt += 1) {
+        try {
+          await _downloadToFile(update, url, file, onProgress);
+          return file;
+        } on Object catch (error) {
+          lastError = error;
+          if (await file.exists()) {
+            await file.delete();
+          }
+          if (!_shouldRetryUpdateError(error) ||
+              attempt == _updateRetryDelays.length - 1) {
+            break;
+          }
+          await Future<void>.delayed(_updateRetryDelays[attempt]);
+        }
+      }
+    }
+
+    throw StateError('$lastError');
+  }
+
+  Future<void> _downloadToFile(
+    AppUpdateInfo update,
+    Uri url,
+    File file,
+    void Function(double? progress) onProgress,
+  ) async {
+    final request = await _client.getUrl(url);
+    request.headers.set(HttpHeaders.userAgentHeader, _updaterUserAgent);
+    request.headers.set(
+      HttpHeaders.acceptHeader,
+      'application/vnd.android.package-archive, application/octet-stream, */*',
+    );
     request.followRedirects = true;
-    final response = await request.close().timeout(const Duration(seconds: 15));
+    final response = await request.close().timeout(const Duration(seconds: 30));
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError('HTTP ${response.statusCode}');
+      await response.drain<void>();
+      throw _UpdateHttpException(response.statusCode);
     }
 
     final sink = file.openWrite();
@@ -111,7 +182,6 @@ class AppUpdateService {
       await sink.close();
     }
     onProgress(1);
-    return file;
   }
 
   Future<void> installApk(File file) async {
@@ -135,19 +205,10 @@ class AppUpdateService {
     Uri uri,
     List<String> supportedAbis,
   ) async {
-    final request = await _client.getUrl(uri);
-    request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-    request.headers.set(HttpHeaders.userAgentHeader, 'YurichConnect-Updater');
-    final response = await request.close().timeout(const Duration(seconds: 12));
-    if (response.statusCode == HttpStatus.notFound) {
+    final json = await _fetchReleaseJson(uri);
+    if (json == null) {
       return null;
     }
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError('Update endpoint HTTP ${response.statusCode}');
-    }
-
-    final raw = await utf8.decodeStream(response);
-    final json = jsonDecode(raw) as Map<String, dynamic>;
     final version = (json['version'] ?? json['tag_name'] ?? json['name'] ?? '')
         .toString();
     if (version.trim().isEmpty) {
@@ -174,8 +235,158 @@ class AppUpdateService {
       version: _normalizeVersion(version),
       assetName: selected['name']?.toString() ?? 'YurichConnect-update.apk',
       downloadUrl: Uri.parse(downloadUrl),
+      fallbackDownloadUrls: _githubDownloadUrls(
+        _normalizeVersion(version),
+        selected['name']?.toString() ?? _githubReleaseAssetName,
+      ),
       size: selected['size'] is int ? selected['size'] as int : null,
     );
+  }
+
+  Future<Map<String, dynamic>?> _fetchReleaseJson(Uri uri) async {
+    Object? lastError;
+    for (var attempt = 0; attempt < _updateRetryDelays.length; attempt += 1) {
+      try {
+        final request = await _client.getUrl(uri);
+        request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+        request.headers.set(HttpHeaders.userAgentHeader, _updaterUserAgent);
+        request.followRedirects = true;
+        final response = await request.close().timeout(
+          const Duration(seconds: 14),
+        );
+        if (response.statusCode == HttpStatus.notFound) {
+          await response.drain<void>();
+          return null;
+        }
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          await response.drain<void>();
+          throw _UpdateHttpException(response.statusCode);
+        }
+
+        final raw = await utf8.decodeStream(response);
+        return jsonDecode(raw) as Map<String, dynamic>;
+      } on Object catch (error) {
+        lastError = error;
+        if (!_shouldRetryUpdateError(error) ||
+            attempt == _updateRetryDelays.length - 1) {
+          break;
+        }
+        await Future<void>.delayed(_updateRetryDelays[attempt]);
+      }
+    }
+
+    throw StateError('$lastError');
+  }
+
+  Future<AppUpdateInfo?> _fetchLatestGitHubReleaseViaRedirect(
+    List<String> supportedAbis,
+  ) async {
+    final tag = await _fetchLatestGitHubTag();
+    if (tag == null || tag.trim().isEmpty) {
+      return null;
+    }
+
+    final assetName = _githubReleaseAssetName;
+    final urls = _githubDownloadUrls(tag, assetName);
+    return AppUpdateInfo(
+      version: _normalizeVersion(tag),
+      assetName: assetName,
+      downloadUrl: urls.first,
+      fallbackDownloadUrls: urls.skip(1).toList(growable: false),
+      size: await _tryFetchContentLength(urls.first),
+    );
+  }
+
+  Future<String?> _fetchLatestGitHubTag() async {
+    Object? lastError;
+    final uri = Uri.parse(
+      'https://github.com/$_githubRepository/releases/latest',
+    );
+    for (var attempt = 0; attempt < _updateRetryDelays.length; attempt += 1) {
+      try {
+        final request = await _client.getUrl(uri);
+        request.headers.set(HttpHeaders.userAgentHeader, _updaterUserAgent);
+        request.followRedirects = false;
+        final response = await request.close().timeout(
+          const Duration(seconds: 14),
+        );
+        final location = response.headers.value(HttpHeaders.locationHeader);
+        await response.drain<void>();
+
+        final resolved = location == null ? uri : uri.resolve(location);
+        final tag = _tagFromGitHubReleaseUri(resolved);
+        if (tag != null) {
+          return tag;
+        }
+
+        if (response.statusCode < 200 || response.statusCode >= 400) {
+          throw _UpdateHttpException(response.statusCode);
+        }
+        return null;
+      } on Object catch (error) {
+        lastError = error;
+        if (!_shouldRetryUpdateError(error) ||
+            attempt == _updateRetryDelays.length - 1) {
+          break;
+        }
+        await Future<void>.delayed(_updateRetryDelays[attempt]);
+      }
+    }
+
+    throw StateError('$lastError');
+  }
+
+  String? _tagFromGitHubReleaseUri(Uri uri) {
+    final segments = uri.pathSegments;
+    final tagIndex = segments.indexOf('tag');
+    if (tagIndex < 0 || tagIndex + 1 >= segments.length) {
+      return null;
+    }
+    return segments[tagIndex + 1];
+  }
+
+  Future<int?> _tryFetchContentLength(Uri uri) async {
+    try {
+      final request = await _client.headUrl(uri);
+      request.headers.set(HttpHeaders.userAgentHeader, _updaterUserAgent);
+      request.followRedirects = true;
+      final response = await request.close().timeout(
+        const Duration(seconds: 14),
+      );
+      final length = response.contentLength;
+      await response.drain<void>();
+      return length > 0 ? length : null;
+    } on Object {
+      return null;
+    }
+  }
+
+  List<Uri> _githubDownloadUrls(String version, String assetName) {
+    final normalized = _normalizeVersion(version);
+    final tag = normalized.startsWith('v') ? normalized : 'v$normalized';
+    return [
+      Uri.parse(
+        'https://github.com/$_githubRepository/releases/download/$tag/$assetName',
+      ),
+      Uri.parse(
+        'https://github.com/$_githubRepository/releases/latest/download/$assetName',
+      ),
+    ];
+  }
+
+  bool _shouldRetryUpdateError(Object error) {
+    if (error is TimeoutException || error is SocketException) {
+      return true;
+    }
+    if (error is _UpdateHttpException) {
+      return error.statusCode == HttpStatus.requestTimeout ||
+          error.statusCode == 429 ||
+          error.statusCode >= 500;
+    }
+    final text = '$error';
+    return text.contains('HTTP 408') ||
+        text.contains('HTTP 429') ||
+        RegExp(r'HTTP 5\d\d').hasMatch(text);
   }
 
   Map<String, dynamic>? _selectAsset(
