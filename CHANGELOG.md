@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.49 - 2026-06-09
+
+- Kept the connection/status panel fixed while the profile list scrolls, so the
+  connect button and uptime stay available with long subscriptions.
+- Made the selected profile highlight stronger and added an explicit active
+  tunnel badge for the currently connected profile.
+- Brightened profile filter tabs so the selected location/protocol filter is
+  visible even when the VPN is stopped.
+
 ## 1.0.48 - 2026-06-09
 
 - Added import and UI recognition for VLESS XHTTP and VLESS mKCP profiles.

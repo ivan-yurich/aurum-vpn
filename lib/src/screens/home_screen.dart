@@ -32,7 +32,7 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.48';
+const _appVersion = '1.0.49';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
@@ -2294,6 +2294,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   Widget build(BuildContext context) {
     final selected = _selectedProfile;
+    final activeProfileId = _connected ? selected?.id : null;
 
     return Scaffold(
       appBar: AppBar(
@@ -2325,71 +2326,80 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ),
         child: SafeArea(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          child: Column(
             children: [
-              _StatusPanel(
-                pulse: _glowPulse,
-                strings: s,
-                status: _status,
-                degraded: _connectionDegraded,
-                message: _message,
-                uplink: _uplink,
-                downlink: _downlink,
-                uptime: _formatDuration(_connectedDuration),
-                onToggle: _toggleVpn,
-                toggleEnabled: !_busy && selected != null,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: _StatusPanel(
+                  pulse: _glowPulse,
+                  strings: s,
+                  status: _status,
+                  degraded: _connectionDegraded,
+                  message: _message,
+                  uplink: _uplink,
+                  downlink: _downlink,
+                  uptime: _formatDuration(_connectedDuration),
+                  onToggle: _toggleVpn,
+                  toggleEnabled: !_busy && selected != null,
+                ),
               ),
-              const SizedBox(height: 16),
-              _ProfilePanel(
-                pulse: _glowPulse,
-                strings: s,
-                profiles: _profiles,
-                selectedProfile: selected,
-                selectedId: selected?.id,
-                selectedTab: _profileTab,
-                onTabChanged: (tab) => setState(() => _profileTab = tab),
-                onSelect: _selectProfile,
-                onAdd: _showImportSheet,
-                onCopy: selected == null ? null : _copySelected,
-                onQr: selected == null ? null : _showQr,
-                onDeleteProfile: (profile) =>
-                    unawaited(_deleteProfile(profile)),
-                onRefreshSubscriptions: () =>
-                    unawaited(_refreshSubscriptions()),
-                hasSubscriptionSources: _profiles.isNotEmpty,
-                subscriptionRefreshBusy: _subscriptionRefreshBusy,
-                subscriptionStatus: _subscriptionTileStatus,
-                subscriptionNeedsAttention: _subscriptionNeedsAttention,
-                kindLabel: _profileKindLabel,
-                displayName: _profileDisplayName,
-                countryFlag: _profileCountryFlag,
-                pingLabel: _profilePingLabel,
-                onPingAll: () => unawaited(_pingProfiles(_profiles)),
-                onPing: (profile) => unawaited(_pingProfile(profile)),
-              ),
-              const SizedBox(height: 16),
-              _AppCenterPanel(
-                strings: s,
-                selectedTab: _supportTab,
-                onTabChanged: (tab) => setState(() => _supportTab = tab),
-                language: _language,
-                onLanguageChanged: (language) =>
-                    unawaited(_setLanguage(language)),
-                onSupport: () => _openUrl(_telegramUrl),
-                onTelegram: () => _openUrl(_telegramUrl),
-                onVk: () => _openUrl(_vkUrl),
-                onDonate: () => _openUrl(_donateUrl),
-                onDeveloper: _emailDeveloper,
-                currentVersion: _appVersion,
-                availableVersion: _availableUpdate?.version,
-                updateMessage: _updateMessage,
-                updateBusy: _updateBusy,
-                updateProgress: _updateProgress,
-                onCheck: _checkAndInstallUpdate,
-                logs: _logs,
-                onExpansionChanged: (expanded) =>
-                    unawaited(_setLogsExpanded(expanded)),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                  children: [
+                    _ProfilePanel(
+                      pulse: _glowPulse,
+                      strings: s,
+                      profiles: _profiles,
+                      selectedProfile: selected,
+                      selectedId: selected?.id,
+                      activeProfileId: activeProfileId,
+                      selectedTab: _profileTab,
+                      onTabChanged: (tab) => setState(() => _profileTab = tab),
+                      onSelect: _selectProfile,
+                      onAdd: _showImportSheet,
+                      onCopy: selected == null ? null : _copySelected,
+                      onQr: selected == null ? null : _showQr,
+                      onDeleteProfile: (profile) =>
+                          unawaited(_deleteProfile(profile)),
+                      onRefreshSubscriptions: () =>
+                          unawaited(_refreshSubscriptions()),
+                      hasSubscriptionSources: _profiles.isNotEmpty,
+                      subscriptionRefreshBusy: _subscriptionRefreshBusy,
+                      subscriptionStatus: _subscriptionTileStatus,
+                      subscriptionNeedsAttention: _subscriptionNeedsAttention,
+                      kindLabel: _profileKindLabel,
+                      displayName: _profileDisplayName,
+                      countryFlag: _profileCountryFlag,
+                      pingLabel: _profilePingLabel,
+                      onPingAll: () => unawaited(_pingProfiles(_profiles)),
+                      onPing: (profile) => unawaited(_pingProfile(profile)),
+                    ),
+                    const SizedBox(height: 16),
+                    _AppCenterPanel(
+                      strings: s,
+                      selectedTab: _supportTab,
+                      onTabChanged: (tab) => setState(() => _supportTab = tab),
+                      language: _language,
+                      onLanguageChanged: (language) =>
+                          unawaited(_setLanguage(language)),
+                      onSupport: () => _openUrl(_telegramUrl),
+                      onTelegram: () => _openUrl(_telegramUrl),
+                      onVk: () => _openUrl(_vkUrl),
+                      onDonate: () => _openUrl(_donateUrl),
+                      onDeveloper: _emailDeveloper,
+                      currentVersion: _appVersion,
+                      availableVersion: _availableUpdate?.version,
+                      updateMessage: _updateMessage,
+                      updateBusy: _updateBusy,
+                      updateProgress: _updateProgress,
+                      onCheck: _checkAndInstallUpdate,
+                      logs: _logs,
+                      onExpansionChanged: (expanded) =>
+                          unawaited(_setLogsExpanded(expanded)),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -2723,6 +2733,7 @@ class _ProfilePanel extends StatelessWidget {
     required this.profiles,
     required this.selectedProfile,
     required this.selectedId,
+    required this.activeProfileId,
     required this.selectedTab,
     required this.onTabChanged,
     required this.onSelect,
@@ -2748,6 +2759,7 @@ class _ProfilePanel extends StatelessWidget {
   final List<VpnProfile> profiles;
   final VpnProfile? selectedProfile;
   final String? selectedId;
+  final String? activeProfileId;
   final _ProfileTab selectedTab;
   final ValueChanged<_ProfileTab> onTabChanged;
   final ValueChanged<VpnProfile> onSelect;
@@ -2839,6 +2851,7 @@ class _ProfilePanel extends StatelessWidget {
                 pulse: pulse,
                 profile: profile,
                 selected: profile.id == selectedId,
+                active: profile.id == activeProfileId,
                 onTap: () => onSelect(profile),
                 kindLabel: kindLabel,
                 displayName: displayName(profile),
@@ -2847,6 +2860,7 @@ class _ProfilePanel extends StatelessWidget {
                 subscriptionStatus: subscriptionStatus(profile),
                 subscriptionNeedsAttention: subscriptionNeedsAttention(profile),
                 subscriptionLabel: strings.subscriptionLabel,
+                activeLabel: strings.activeProfile,
                 onPing: () => onPing(profile),
                 onDelete: () => onDeleteProfile(profile),
                 deleteTooltip: strings.delete,
@@ -2917,10 +2931,10 @@ class _ProfileTabBar extends StatelessWidget {
                         ? [
                             BoxShadow(
                               color: _cyanGlow.withValues(
-                                alpha: 0.16 + pulse.value * 0.18,
+                                alpha: 0.24 + pulse.value * 0.22,
                               ),
-                              blurRadius: 12 + pulse.value * 10,
-                              spreadRadius: pulse.value,
+                              blurRadius: 16 + pulse.value * 12,
+                              spreadRadius: 1 + pulse.value,
                             ),
                           ]
                         : null,
@@ -2933,19 +2947,23 @@ class _ProfileTabBar extends StatelessWidget {
                 selected: selectedTab == tab,
                 showCheckmark: false,
                 onSelected: (_) => onChanged(tab),
-                selectedColor: _gold.withValues(alpha: 0.9),
-                backgroundColor: _surface,
+                selectedColor: _cyanGlow,
+                backgroundColor: _surfaceMetric,
+                surfaceTintColor: Colors.transparent,
                 labelStyle: TextStyle(
                   color: selectedTab == tab ? _ink : _goldSoft,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: selectedTab == tab
+                      ? FontWeight.w900
+                      : FontWeight.w700,
                   letterSpacing: 0,
                 ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                   side: BorderSide(
                     color: selectedTab == tab
-                        ? _goldSoft
+                        ? _goldSoft.withValues(alpha: 0.95)
                         : _gold.withValues(alpha: 0.2),
+                    width: selectedTab == tab ? 1.4 : 1,
                   ),
                 ),
               ),
@@ -2970,6 +2988,7 @@ class _ProfileTile extends StatelessWidget {
     required this.pulse,
     required this.profile,
     required this.selected,
+    required this.active,
     required this.onTap,
     required this.kindLabel,
     required this.displayName,
@@ -2978,6 +2997,7 @@ class _ProfileTile extends StatelessWidget {
     required this.subscriptionStatus,
     required this.subscriptionNeedsAttention,
     required this.subscriptionLabel,
+    required this.activeLabel,
     required this.onPing,
     required this.onDelete,
     required this.deleteTooltip,
@@ -2986,6 +3006,7 @@ class _ProfileTile extends StatelessWidget {
   final Animation<double> pulse;
   final VpnProfile profile;
   final bool selected;
+  final bool active;
   final VoidCallback onTap;
   final String Function(VpnProfileKind kind) kindLabel;
   final String displayName;
@@ -2994,6 +3015,7 @@ class _ProfileTile extends StatelessWidget {
   final String? subscriptionStatus;
   final bool subscriptionNeedsAttention;
   final String subscriptionLabel;
+  final String activeLabel;
   final VoidCallback onPing;
   final VoidCallback onDelete;
   final String deleteTooltip;
@@ -3024,7 +3046,10 @@ class _ProfileTile extends StatelessWidget {
                 displayName,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleSmall,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: selected ? Colors.white : null,
+                  fontWeight: selected ? FontWeight.w800 : FontWeight.w700,
+                ),
               ),
               const SizedBox(height: 4),
               Text(
@@ -3049,6 +3074,44 @@ class _ProfileTile extends StatelessWidget {
                         : FontWeight.w400,
                     letterSpacing: 0,
                   ),
+                ),
+              ],
+              if (active) ...[
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF67E8F9), Color(0xFF0EA5FF)],
+                        ),
+                        borderRadius: BorderRadius.circular(999),
+                        boxShadow: [
+                          BoxShadow(
+                            color: _cyanGlow.withValues(alpha: 0.28),
+                            blurRadius: 10,
+                          ),
+                        ],
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        child: Text(
+                          activeLabel,
+                          maxLines: 1,
+                          style: const TextStyle(
+                            color: _ink,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ],
@@ -3097,6 +3160,11 @@ class _ProfileTile extends StatelessWidget {
       animation: pulse,
       builder: (context, child) {
         final glowPower = selected ? pulse.value : 0.0;
+        final borderColor = active
+            ? _cyanGlow.withValues(alpha: 0.9)
+            : selected
+            ? _goldSoft.withValues(alpha: 0.82)
+            : Colors.white12;
         return InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(8),
@@ -3107,7 +3175,11 @@ class _ProfileTile extends StatelessWidget {
                   ? const LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
-                      colors: [Color(0xFF0D3B56), Color(0xFF0B2234)],
+                      colors: [
+                        Color(0xFF0E4A68),
+                        Color(0xFF0A2C42),
+                        Color(0xFF071C2B),
+                      ],
                     )
                   : const LinearGradient(
                       begin: Alignment.topLeft,
@@ -3115,18 +3187,14 @@ class _ProfileTile extends StatelessWidget {
                       colors: [_surface, Color(0xFF0A1723)],
                     ),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: selected
-                    ? _cyanGlow.withValues(alpha: 0.74 + glowPower * 0.26)
-                    : Colors.white12,
-              ),
-              boxShadow: selected
+              border: Border.all(color: borderColor, width: selected ? 1.4 : 1),
+              boxShadow: selected || active
                   ? [
                       BoxShadow(
-                        color: _cyanGlow.withValues(
-                          alpha: 0.12 + glowPower * 0.16,
+                        color: (active ? _cyanGlow : _gold).withValues(
+                          alpha: 0.14 + glowPower * 0.18,
                         ),
-                        blurRadius: 14 + glowPower * 12,
+                        blurRadius: 16 + glowPower * 14,
                         spreadRadius: glowPower,
                         offset: const Offset(0, 7),
                       ),
@@ -3977,6 +4045,7 @@ class _Strings {
     required this.disconnecting,
     required this.stopped,
     required this.profiles,
+    required this.activeProfile,
     required this.refreshPing,
     required this.showQr,
     required this.copy,
@@ -4058,6 +4127,7 @@ class _Strings {
   final String disconnecting;
   final String stopped;
   final String profiles;
+  final String activeProfile;
   final String refreshPing;
   final String showQr;
   final String copy;
@@ -4336,6 +4406,7 @@ class _Strings {
     disconnecting: 'Отключаюсь',
     stopped: 'Остановлено',
     profiles: 'Профили',
+    activeProfile: 'Активен',
     refreshPing: 'Обновить пинг',
     showQr: 'Показать QR',
     copy: 'Скопировать',
@@ -4458,6 +4529,7 @@ class _Strings {
     disconnecting: 'Disconnecting',
     stopped: 'Stopped',
     profiles: 'Profiles',
+    activeProfile: 'Active',
     refreshPing: 'Refresh ping',
     showQr: 'Show QR',
     copy: 'Copy',
