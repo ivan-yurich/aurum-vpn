@@ -32,7 +32,7 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.51';
+const _appVersion = '1.0.52';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
@@ -71,6 +71,15 @@ enum _AppLanguage {
 enum _ProfileTab { all, vless, naive, hysteria, singBox }
 
 enum _SupportTab { help, community }
+
+class _ProfileConnectionBlocked implements Exception {
+  const _ProfileConnectionBlocked(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
 
 _ProfileTab _profileTabForKind(VpnProfileKind kind) {
   return switch (kind) {
@@ -805,13 +814,26 @@ class _HomeScreenState extends State<HomeScreen>
       return;
     }
 
+    final blockReason = _profileConnectBlockReason(profile);
+    if (_connected && blockReason != null) {
+      _queueLog(
+        'Profile switch blocked for ${profile.kind.label}: $blockReason',
+      );
+      setState(() => _message = blockReason);
+      _showSnack(blockReason);
+      return;
+    }
+
     if (!_connected) {
       setState(() {
         _selectedProfileId = profile.id;
-        _message = s.selectedProfile(profile.name);
+        _message = blockReason ?? s.selectedProfile(profile.name);
       });
       await _store.saveSelectedProfileId(profile.id);
       unawaited(_pingProfile(profile));
+      if (blockReason != null) {
+        _showSnack(blockReason);
+      }
       return;
     }
 
@@ -828,6 +850,17 @@ class _HomeScreenState extends State<HomeScreen>
       return;
     }
 
+    final blockReason = _profileConnectBlockReason(profile);
+    if (blockReason != null) {
+      _queueLog('Connection blocked for ${profile.kind.label}: $blockReason');
+      setState(() {
+        _lastError = blockReason;
+        _message = blockReason;
+      });
+      _showSnack(blockReason);
+      return;
+    }
+
     _autoRecoveryArmed = true;
     await _runBusy(() async {
       try {
@@ -840,6 +873,11 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _startVpnCore(VpnProfile profile) async {
+    final blockReason = _profileConnectBlockReason(profile);
+    if (blockReason != null) {
+      throw _ProfileConnectionBlocked(blockReason);
+    }
+
     _ignoreStoppedUntil = DateTime.now().add(const Duration(seconds: 18));
     final status = await _refreshVpnStatus();
     if (status != AurumVpnStatus.stopped) {
@@ -994,6 +1032,20 @@ class _HomeScreenState extends State<HomeScreen>
       });
     }
     unawaited(_refreshConnectedCountry(profile.id));
+  }
+
+  String? _profileConnectBlockReason(VpnProfile profile) {
+    if (profile.kind == VpnProfileKind.vlessXhttp ||
+        profile.kind == VpnProfileKind.vlessMkcp) {
+      return s.xrayRequiredFor(profile.kind);
+    }
+
+    final unsupportedTransport = profile.outbound?['unsupported_transport'];
+    if (unsupportedTransport is String && unsupportedTransport.isNotEmpty) {
+      return s.xrayRequiredFor(profile.kind);
+    }
+
+    return null;
   }
 
   Future<void> _disconnect() async {
@@ -4342,6 +4394,13 @@ class _Strings {
   String connectionProfile(String name) => switch (this) {
     _Strings.en => 'Connection: $name',
     _ => 'Подключение: $name',
+  };
+
+  String xrayRequiredFor(VpnProfileKind kind) => switch (this) {
+    _Strings.en =>
+      '${kind.label} requires the Xray/libXray engine. This Android build uses sing-box, so the current VPN connection was left unchanged.',
+    _ =>
+      '${kind.label} требует Xray/libXray движок. Эта Android-сборка работает на sing-box, поэтому текущее VPN-подключение оставлено без изменений.',
   };
 
   String networkRecoveryPaused(String name) => switch (this) {

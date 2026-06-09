@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.52 - 2026-06-09
+
+- Blocked VLESS XHTTP/mKCP connection attempts before stopping the currently
+  working tunnel.
+- Replaced the technical `Unsupported operation` text with a clear Xray/libXray
+  requirement message.
+- Kept imported XHTTP/mKCP profiles visible for a future Xray engine without
+  breaking Hysteria2, NaiveProxy, or VLESS Reality sessions.
+
 ## 1.0.51 - 2026-06-09
 
 - Fixed the in-app version shown to the updater so it matches the Android
