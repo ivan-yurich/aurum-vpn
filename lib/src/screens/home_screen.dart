@@ -32,7 +32,7 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.52';
+const _appVersion = '1.0.53';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
@@ -1997,8 +1997,16 @@ class _HomeScreenState extends State<HomeScreen>
       }
     } on Object catch (error) {
       if (mounted) {
-        setState(
-          () => _updateMessage = s.updateFailed(_redactSensitive('$error')),
+        final errorText = _redactSensitive('$error');
+        setState(() => _updateMessage = s.updateFailed(errorText));
+        _showSnack(
+          s.updateFailed(errorText),
+          action: SnackBarAction(
+            label: s.downloadApk,
+            onPressed: () => unawaited(
+              _openUrl(AppUpdateService.latestApkDownloadUri.toString()),
+            ),
+          ),
         );
       }
     } finally {
@@ -4447,6 +4455,11 @@ class _Strings {
   String get updateNow => switch (this) {
     _Strings.en => 'Update',
     _ => 'Обновить',
+  };
+
+  String get downloadApk => switch (this) {
+    _Strings.en => 'APK',
+    _ => 'APK',
   };
 
   String updateNoUpdates(String version) => switch (this) {

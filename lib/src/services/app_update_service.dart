@@ -60,6 +60,11 @@ class AppUpdateService {
 
   static const _channel = MethodChannel('online.dnsai.ivanvpn/updater');
 
+  static Uri get latestApkDownloadUri => Uri.parse(
+    'https://github.com/$_githubRepository/releases/latest/download/'
+    '$_githubReleaseAssetName',
+  );
+
   final HttpClient _client;
   final List<Uri> _releaseApiUris;
 

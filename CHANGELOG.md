@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.53 - 2026-06-09
+
+- Added a direct APK fallback action when the in-app updater cannot complete
+  download or installation through Android.
+- Kept the GitHub Releases updater as the primary channel, but made the user
+  path less fragile when GitHub API, Android installer, or install permissions
+  fail on a device.
+- Bumped the Android version so phones on `1.0.52` can verify the update flow
+  against a newer build.
+
 ## 1.0.52 - 2026-06-09
 
 - Blocked VLESS XHTTP/mKCP connection attempts before stopping the currently
