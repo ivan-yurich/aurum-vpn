@@ -13,7 +13,6 @@ class SingBoxConfigBuilder {
   String build(
     VpnProfile profile, {
     NaiveOutboundMode naiveMode = NaiveOutboundMode.auto,
-    int? xrayBridgeSocksPort,
   }) {
     if (profile.kind == VpnProfileKind.singBoxConfig) {
       final raw = profile.rawConfig;
@@ -28,34 +27,18 @@ class SingBoxConfigBuilder {
       throw StateError('У профиля нет outbound-конфига.');
     }
 
-    final useXrayBridge =
-        (profile.kind == VpnProfileKind.vlessXhttp ||
-            profile.kind == VpnProfileKind.vlessMkcp) &&
-        xrayBridgeSocksPort != null;
-
-    if (!useXrayBridge &&
-        (profile.kind == VpnProfileKind.vlessXhttp ||
-            profile.kind == VpnProfileKind.vlessMkcp)) {
+    if (!profile.kind.isClientSupported &&
+        profile.kind != VpnProfileKind.naive) {
       throw UnsupportedError(
-        '${profile.kind.label} требует Xray/libXray движок. '
-        'Текущая Android-сборка использует sing-box, который не поддерживает '
-        'этот VLESS transport.',
+        '${profile.kind.label} отключён в этой Android-сборке. '
+        'Используй VLESS Reality или Hysteria/Hysteria2.',
       );
     }
 
-    final proxyOutbound = useXrayBridge
-        ? <String, dynamic>{
-            'type': 'socks',
-            'tag': 'proxy',
-            'server': '127.0.0.1',
-            'server_port': xrayBridgeSocksPort,
-            'version': '5',
-          }
-        : jsonDecode(jsonEncode(outbound)) as Map<String, dynamic>;
+    final proxyOutbound =
+        jsonDecode(jsonEncode(outbound)) as Map<String, dynamic>;
     proxyOutbound['tag'] = 'proxy';
-    if (!useXrayBridge) {
-      _normalizeOutbound(profile, proxyOutbound, naiveMode);
-    }
+    _normalizeOutbound(profile, proxyOutbound, naiveMode);
     _applyDialStability(proxyOutbound);
     final rejectUnsupportedUdp = profile.kind == VpnProfileKind.naive;
 
@@ -185,9 +168,7 @@ class SingBoxConfigBuilder {
     NaiveOutboundMode naiveMode,
   ) {
     if (profile.kind == VpnProfileKind.vlessReality ||
-        profile.kind == VpnProfileKind.vlessTls ||
-        profile.kind == VpnProfileKind.vlessXhttp ||
-        profile.kind == VpnProfileKind.vlessMkcp) {
+        profile.kind == VpnProfileKind.vlessTls) {
       if (proxyOutbound['network'] == 'tcp') {
         proxyOutbound.remove('network');
       }

@@ -102,26 +102,6 @@ class MethodChannelFlutterSingbox extends FlutterSingboxPlatform {
   }
 
   @override
-  Future<bool> startXray(String config) async {
-    final result = await methodChannel.invokeMethod<bool>('startXray', {
-      'config': config,
-    });
-    return result ?? false;
-  }
-
-  @override
-  Future<bool> stopXray() async {
-    final result = await methodChannel.invokeMethod<bool>('stopXray');
-    return result ?? false;
-  }
-
-  @override
-  Future<bool> isXrayRunning() async {
-    final result = await methodChannel.invokeMethod<bool>('isXrayRunning');
-    return result ?? false;
-  }
-
-  @override
   Future<String> getVPNStatus() async {
     final status = await methodChannel.invokeMethod<String>('getVPNStatus');
     return status ?? 'Stopped';

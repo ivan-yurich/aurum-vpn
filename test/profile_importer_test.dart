@@ -6,7 +6,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:aurum_vpn/src/models/vpn_profile.dart';
 import 'package:aurum_vpn/src/services/profile_importer.dart';
 import 'package:aurum_vpn/src/services/sing_box_config_builder.dart';
-import 'package:aurum_vpn/src/services/xray_config_builder.dart';
 
 void main() {
   test('imports VLESS Reality link', () async {
@@ -23,7 +22,7 @@ void main() {
     expect(profiles.first.outbound?['tls']['reality']['public_key'], 'abc123');
   });
 
-  test('imports VLESS XHTTP link as Xray-only profile', () async {
+  test('imports VLESS XHTTP link as unsupported legacy profile', () async {
     const link =
         'vless://11111111-1111-4111-8111-111111111111@example.com:443?security=tls&type=xhttp&sni=example.com&path=%2Fxhttp#XHTTP';
 
@@ -35,38 +34,11 @@ void main() {
     expect(profile.outbound?['transport_options']['path'], '/xhttp');
     expect(
       () => SingBoxConfigBuilder().build(profile),
-      throwsA(
-        isA<UnsupportedError>().having(
-          (error) => error.message,
-          'message',
-          contains('Xray/libXray'),
-        ),
-      ),
+      throwsA(isA<UnsupportedError>()),
     );
-
-    final bridgeConfig =
-        jsonDecode(XrayConfigBuilder().buildBridge(profile).xrayConfig)
-            as Map<String, dynamic>;
-    final xrayOutbound =
-        (bridgeConfig['outbounds'] as List).first as Map<String, dynamic>;
-    final streamSettings =
-        xrayOutbound['streamSettings'] as Map<String, dynamic>;
-    expect(streamSettings['network'], 'xhttp');
-    expect(streamSettings['xhttpSettings'], {'path': '/xhttp'});
-
-    final singBoxBridge =
-        jsonDecode(
-              SingBoxConfigBuilder().build(profile, xrayBridgeSocksPort: 21880),
-            )
-            as Map<String, dynamic>;
-    final proxy =
-        (singBoxBridge['outbounds'] as List).first as Map<String, dynamic>;
-    expect(proxy['type'], 'socks');
-    expect(proxy['server'], '127.0.0.1');
-    expect(proxy['server_port'], 21880);
   });
 
-  test('imports VLESS mKCP link as Xray-only profile', () async {
+  test('imports VLESS mKCP link as unsupported legacy profile', () async {
     const link =
         'vless://11111111-1111-4111-8111-111111111111@example.com:8446?security=none&type=mkcp&headerType=wechat-video#MKCP';
 
@@ -83,16 +55,6 @@ void main() {
       () => SingBoxConfigBuilder().build(profile),
       throwsA(isA<UnsupportedError>()),
     );
-
-    final bridgeConfig =
-        jsonDecode(XrayConfigBuilder().buildBridge(profile).xrayConfig)
-            as Map<String, dynamic>;
-    final xrayOutbound =
-        (bridgeConfig['outbounds'] as List).first as Map<String, dynamic>;
-    final streamSettings =
-        xrayOutbound['streamSettings'] as Map<String, dynamic>;
-    expect(streamSettings['network'], 'kcp');
-    expect(streamSettings['kcpSettings'], isEmpty);
   });
 
   test('imports Hysteria2 link', () async {

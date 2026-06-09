@@ -14,7 +14,6 @@ import '../services/profile_importer.dart';
 import '../services/profile_store.dart';
 import '../services/sing_box_config_builder.dart';
 import '../services/vpn_engine.dart';
-import '../services/xray_config_builder.dart';
 import 'qr_scan_screen.dart';
 
 const _gold = Color(0xFF0EA5FF);
@@ -33,11 +32,10 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.55';
+const _appVersion = '1.0.56';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
-const _nativeXrayTimeout = Duration(seconds: 8);
 const _subscriptionReminderWindow = Duration(days: 5);
 const _tunnelHealthProbeInterval = Duration(seconds: 105);
 const _startupProbeRecheckDelay = Duration(seconds: 8);
@@ -70,7 +68,7 @@ enum _AppLanguage {
   }
 }
 
-enum _ProfileTab { all, vless, naive, hysteria, singBox }
+enum _ProfileTab { all, vless, hysteria }
 
 enum _SupportTab { help, community }
 
@@ -85,18 +83,24 @@ class _ProfileConnectionBlocked implements Exception {
 
 _ProfileTab _profileTabForKind(VpnProfileKind kind) {
   return switch (kind) {
-    VpnProfileKind.vlessReality ||
+    VpnProfileKind.vlessReality => _ProfileTab.vless,
+    VpnProfileKind.hysteria2 || VpnProfileKind.hysteria => _ProfileTab.hysteria,
     VpnProfileKind.vlessTls ||
     VpnProfileKind.vlessXhttp ||
-    VpnProfileKind.vlessMkcp => _ProfileTab.vless,
-    VpnProfileKind.naive => _ProfileTab.naive,
-    VpnProfileKind.hysteria2 || VpnProfileKind.hysteria => _ProfileTab.hysteria,
-    VpnProfileKind.singBoxConfig => _ProfileTab.singBox,
+    VpnProfileKind.vlessMkcp ||
+    VpnProfileKind.naive ||
+    VpnProfileKind.singBoxConfig => _ProfileTab.all,
   };
 }
 
 bool _profileMatchesTab(VpnProfile profile, _ProfileTab tab) {
   return tab == _ProfileTab.all || _profileTabForKind(profile.kind) == tab;
+}
+
+List<VpnProfile> _clientSupportedProfiles(List<VpnProfile> profiles) {
+  return profiles
+      .where((profile) => profile.kind.isClientSupported)
+      .toList(growable: false);
 }
 
 class HomeScreen extends StatefulWidget {
@@ -112,7 +116,6 @@ class _HomeScreenState extends State<HomeScreen>
   final _store = ProfileStore();
   final _importer = ProfileImporter();
   final _configBuilder = SingBoxConfigBuilder();
-  final _xrayConfigBuilder = XrayConfigBuilder();
   final _updateService = AppUpdateService();
   final _geoService = ProfileGeoService();
   final _manualController = TextEditingController();
@@ -266,7 +269,11 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _load() async {
-    final profiles = await _store.loadProfiles();
+    final storedProfiles = await _store.loadProfiles();
+    final profiles = _clientSupportedProfiles(storedProfiles);
+    if (profiles.length != storedProfiles.length) {
+      await _store.saveProfiles(profiles);
+    }
     final selectedId = await _store.loadSelectedProfileId();
     final language = _AppLanguage.fromCode(await _store.loadLanguageCode());
     if (!mounted) {
@@ -546,9 +553,11 @@ class _HomeScreenState extends State<HomeScreen>
 
   Future<void> _importText(String text) async {
     await _runBusy(() async {
-      final imported = await _importer.importFromText(text);
+      final imported = _clientSupportedProfiles(
+        await _importer.importFromText(text),
+      );
       if (imported.isEmpty) {
-        throw ProfileImportException(s.nothingToImport);
+        throw ProfileImportException(s.supportedProtocolsOnly);
       }
 
       final importedWithCachedData = _profilesWithCachedData(imported);
@@ -596,10 +605,12 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   List<VpnProfile> _mergeProfiles(List<VpnProfile> profiles) {
-    return <String, VpnProfile>{
-      for (final profile in _profiles) profile.id: profile,
-      for (final profile in profiles) profile.id: profile,
-    }.values.toList();
+    return _clientSupportedProfiles(
+      <String, VpnProfile>{
+        for (final profile in _profiles) profile.id: profile,
+        for (final profile in profiles) profile.id: profile,
+      }.values.toList(),
+    );
   }
 
   List<String> _subscriptionSourcesFor(List<VpnProfile> profiles) {
@@ -637,7 +648,9 @@ class _HomeScreenState extends State<HomeScreen>
       Object? lastError;
       for (final source in sources) {
         try {
-          imported.addAll(await _importer.importFromText(source));
+          imported.addAll(
+            _clientSupportedProfiles(await _importer.importFromText(source)),
+          );
         } on Object catch (error) {
           lastError = error;
           _queueLog(
@@ -903,206 +916,146 @@ class _HomeScreenState extends State<HomeScreen>
       _vpnEngine.requestNotificationPermission(),
     );
 
-    XrayBridgeConfig? xrayBridge;
-    var xrayBridgeStarted = false;
-    if (_usesXrayBridge(profile)) {
-      xrayBridge = _xrayConfigBuilder.buildBridge(profile);
-      bool xrayStarted;
-      try {
-        xrayStarted = await _nativeCall(
-          'startXray',
-          _vpnEngine.startXray(xrayBridge.xrayConfig),
-          timeout: _nativeXrayTimeout,
-        );
-      } on PlatformException catch (error) {
-        if (error.code == 'XRAY_BINARY_MISSING') {
-          throw StateError(s.xrayArm64Only(profile.kind));
-        }
-        rethrow;
-      }
-      if (!xrayStarted) {
-        throw StateError('Xray core не запустился для ${profile.kind.label}.');
-      }
-      xrayBridgeStarted = true;
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-    } else {
-      await _bestEffortNative(
-        'stopXray stale bridge',
-        _vpnEngine.stopXray().timeout(
-          _nativeShortTimeout,
-          onTimeout: () => false,
-        ),
+    Object? lastStartError;
+    var connected = false;
+    var startupProbeDegraded = false;
+    final plans = _connectionPlans(profile);
+
+    for (
+      var planIndex = 0;
+      planIndex < plans.length && !connected;
+      planIndex += 1
+    ) {
+      final plan = plans[planIndex];
+      final config = _configBuilder.build(profile, naiveMode: plan.naiveMode);
+      final configSummary = _summarizeSingBoxConfig(
+        config,
+        target: _vpnEngine.configTarget,
       );
-    }
+      final saved = await _nativeCall(
+        'saveConfig',
+        _vpnEngine.saveConfig(config),
+        timeout: _nativeConfigTimeout,
+      );
+      if (!saved) {
+        throw StateError(s.configSaveFailed);
+      }
 
-    try {
-      Object? lastStartError;
-      var connected = false;
-      var startupProbeDegraded = false;
-      final plans = _connectionPlans(profile);
-
-      for (
-        var planIndex = 0;
-        planIndex < plans.length && !connected;
-        planIndex += 1
-      ) {
-        final plan = plans[planIndex];
-        final config = _configBuilder.build(
-          profile,
-          naiveMode: plan.naiveMode,
-          xrayBridgeSocksPort: xrayBridge?.localSocksPort,
-        );
-        final configSummary = _summarizeSingBoxConfig(
-          config,
-          target: _vpnEngine.configTarget,
-        );
-        final saved = await _nativeCall(
-          'saveConfig',
-          _vpnEngine.saveConfig(config),
-          timeout: _nativeConfigTimeout,
-        );
-        if (!saved) {
-          throw StateError(s.configSaveFailed);
+      for (var attempt = 1; attempt <= 2 && !connected; attempt += 1) {
+        if (mounted) {
+          setState(() {
+            _selectedProfileId = profile.id;
+            _lastError = null;
+            _message = plans.length > 1
+                ? '${s.connectingStatus(profile.name)} · ${plan.label}'
+                : s.connectingStatus(profile.name);
+            _uplink = '0 B/s';
+            _downlink = '0 B/s';
+            _sessionTotal = '0 B';
+            _lastConfigSummary = configSummary;
+          });
         }
 
-        for (var attempt = 1; attempt <= 2 && !connected; attempt += 1) {
-          if (mounted) {
-            setState(() {
-              _selectedProfileId = profile.id;
-              _lastError = null;
-              _message = plans.length > 1
-                  ? '${s.connectingStatus(profile.name)} · ${plan.label}'
-                  : s.connectingStatus(profile.name);
-              _uplink = '0 B/s';
-              _downlink = '0 B/s';
-              _sessionTotal = '0 B';
-              _lastConfigSummary = configSummary;
-            });
-          }
+        bool started;
+        try {
+          started = await _nativeCall(
+            'startVPN',
+            _vpnEngine.startVPN(),
+            timeout: _nativeStartTimeout,
+          );
+        } on Object catch (error) {
+          started = false;
+          lastStartError = _redactSensitive('$error');
+        }
+        if (started) {
+          final finalStatus = await _waitForVpnStatus({
+            AurumVpnStatus.started,
+          }, timeout: const Duration(seconds: 14));
+          if (finalStatus == AurumVpnStatus.started) {
+            if (profile.kind != VpnProfileKind.naive) {
+              connected = true;
+              break;
+            }
 
-          bool started;
-          try {
-            started = await _nativeCall(
-              'startVPN',
-              _vpnEngine.startVPN(),
-              timeout: _nativeStartTimeout,
-            );
-          } on Object catch (error) {
-            started = false;
-            lastStartError = _redactSensitive('$error');
-          }
-          if (started) {
-            final finalStatus = await _waitForVpnStatus({
-              AurumVpnStatus.started,
-            }, timeout: const Duration(seconds: 14));
-            if (finalStatus == AurumVpnStatus.started) {
-              if (profile.kind != VpnProfileKind.naive &&
-                  !_usesXrayBridge(profile)) {
-                connected = true;
-                break;
-              }
-
-              if (await _probeLocalMixedProxy()) {
-                connected = true;
-                break;
-              } else {
-                startupProbeDegraded = true;
-                connected = true;
-                _queueLog(
-                  'Startup proxy probe did not pass after VPN status Started; '
-                  'keeping tunnel alive and handing off to watchdog.',
-                );
-                break;
-              }
+            if (await _probeLocalMixedProxy()) {
+              connected = true;
+              break;
             } else {
-              lastStartError = s.vpnNotConnected(finalStatus);
+              startupProbeDegraded = true;
+              connected = true;
+              _queueLog(
+                'Startup proxy probe did not pass after VPN status Started; '
+                'keeping tunnel alive and handing off to watchdog.',
+              );
+              break;
             }
           } else {
-            lastStartError = s.vpnStartFailed;
+            lastStartError = s.vpnNotConnected(finalStatus);
           }
-
-          if (!connected) {
-            _queueLog(
-              'VPN start retry [$attempt/${plan.label}]: '
-              '${_redactSensitive('$lastStartError')}',
-            );
-            await _stopVpnCore(updateMessage: false);
-            await Future<void>.delayed(const Duration(milliseconds: 1600));
-            await _bestEffortNative(
-              'saveConfig retry',
-              _vpnEngine.saveConfig(config),
-              timeout: _nativeConfigTimeout,
-            );
-            _ignoreStoppedUntil = DateTime.now().add(
-              const Duration(seconds: 14),
-            );
-          }
+        } else {
+          lastStartError = s.vpnStartFailed;
         }
 
-        if (!connected && planIndex < plans.length - 1) {
-          _queueLog('Naive mode fallback: ${plan.label} did not pass probe.');
-          await Future<void>.delayed(const Duration(milliseconds: 800));
-        }
-      }
-
-      if (!connected) {
-        throw StateError('${lastStartError ?? s.vpnStartFailed}');
-      }
-
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-      await _store.saveSelectedProfileId(profile.id);
-      if (mounted) {
-        setState(() {
-          _selectedProfileId = profile.id;
-          _lastError = null;
-          _autoReconnectAttempts = 0;
-          _nextAutoReconnectAt = null;
-          _tunnelHealthFailures = startupProbeDegraded
-              ? _tunnelHealthFailureThreshold - 1
-              : 0;
-          _autoRecoveryArmed = true;
-          _connectedSince ??= DateTime.now();
-          _clockNow = DateTime.now();
-          _lastTrafficAt = DateTime.now();
-          _lastHealthyAt = startupProbeDegraded ? null : DateTime.now();
-          _lastSessionTrafficBytes = 0;
-          _nextTunnelHealthCheckAt = DateTime.now().add(
-            startupProbeDegraded
-                ? _startupProbeRecheckDelay
-                : _tunnelHealthProbeInterval,
+        if (!connected) {
+          _queueLog(
+            'VPN start retry [$attempt/${plan.label}]: '
+            '${_redactSensitive('$lastStartError')}',
           );
-          _message = s.connectionProfile(profile.name);
-        });
+          await _stopVpnCore(updateMessage: false);
+          await Future<void>.delayed(const Duration(milliseconds: 1600));
+          await _bestEffortNative(
+            'saveConfig retry',
+            _vpnEngine.saveConfig(config),
+            timeout: _nativeConfigTimeout,
+          );
+          _ignoreStoppedUntil = DateTime.now().add(const Duration(seconds: 14));
+        }
       }
-      unawaited(_refreshConnectedCountry(profile.id));
-    } on Object {
-      if (xrayBridgeStarted) {
-        await _bestEffortNative(
-          'stopXray after failed start',
-          _vpnEngine.stopXray().timeout(
-            _nativeShortTimeout,
-            onTimeout: () => false,
-          ),
-        );
+
+      if (!connected && planIndex < plans.length - 1) {
+        _queueLog('Naive mode fallback: ${plan.label} did not pass probe.');
+        await Future<void>.delayed(const Duration(milliseconds: 800));
       }
-      rethrow;
     }
+
+    if (!connected) {
+      throw StateError('${lastStartError ?? s.vpnStartFailed}');
+    }
+
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    await _store.saveSelectedProfileId(profile.id);
+    if (mounted) {
+      setState(() {
+        _selectedProfileId = profile.id;
+        _lastError = null;
+        _autoReconnectAttempts = 0;
+        _nextAutoReconnectAt = null;
+        _tunnelHealthFailures = startupProbeDegraded
+            ? _tunnelHealthFailureThreshold - 1
+            : 0;
+        _autoRecoveryArmed = true;
+        _connectedSince ??= DateTime.now();
+        _clockNow = DateTime.now();
+        _lastTrafficAt = DateTime.now();
+        _lastHealthyAt = startupProbeDegraded ? null : DateTime.now();
+        _lastSessionTrafficBytes = 0;
+        _nextTunnelHealthCheckAt = DateTime.now().add(
+          startupProbeDegraded
+              ? _startupProbeRecheckDelay
+              : _tunnelHealthProbeInterval,
+        );
+        _message = s.connectionProfile(profile.name);
+      });
+    }
+    unawaited(_refreshConnectedCountry(profile.id));
   }
 
   String? _profileConnectBlockReason(VpnProfile profile) {
-    final unsupportedTransport = profile.outbound?['unsupported_transport'];
-    if (unsupportedTransport is String &&
-        unsupportedTransport.isNotEmpty &&
-        !_usesXrayBridge(profile)) {
-      return s.xrayRequiredFor(profile.kind);
+    if (!profile.kind.isClientSupported) {
+      return s.unsupportedProtocol(profile.kind);
     }
 
     return null;
-  }
-
-  bool _usesXrayBridge(VpnProfile profile) {
-    return profile.kind == VpnProfileKind.vlessXhttp ||
-        profile.kind == VpnProfileKind.vlessMkcp;
   }
 
   Future<void> _disconnect() async {
@@ -1134,14 +1087,6 @@ class _HomeScreenState extends State<HomeScreen>
         }
         await Future<void>.delayed(const Duration(milliseconds: 700));
       }
-
-      await _bestEffortNative(
-        'stopXray bridge',
-        _vpnEngine.stopXray().timeout(
-          _nativeShortTimeout,
-          onTimeout: () => false,
-        ),
-      );
 
       if (mounted) {
         _ignoreStoppedUntil = DateTime.now().add(const Duration(seconds: 18));
@@ -2271,7 +2216,6 @@ class _HomeScreenState extends State<HomeScreen>
         'network=${proxy['network_strategy'] ?? 'default'}',
         if (proxy['type'] == 'http') 'mode=https-connect',
         if (proxy['type'] == 'naive') 'mode=naive-native',
-        if (proxy['type'] == 'socks') 'mode=xray-bridge',
         if (proxy['type'] == 'http' || proxy['type'] == 'naive')
           'health_probe=mixed-proxy',
         if (proxy['type'] == 'naive')
@@ -4211,6 +4155,7 @@ class _Strings {
   const _Strings._({
     required this.addProfileHint,
     required this.nothingToImport,
+    required this.supportedProtocolsOnly,
     required this.switchingProfile,
     required this.importFirst,
     required this.configSaveFailed,
@@ -4293,6 +4238,7 @@ class _Strings {
 
   final String addProfileHint;
   final String nothingToImport;
+  final String supportedProtocolsOnly;
   final String switchingProfile;
   final String importFirst;
   final String configSaveFailed;
@@ -4427,9 +4373,7 @@ class _Strings {
         _ => 'Все',
       },
       _ProfileTab.vless => 'VLESS',
-      _ProfileTab.naive => 'Naive',
       _ProfileTab.hysteria => 'Hysteria',
-      _ProfileTab.singBox => 'JSON',
     };
     return '$label $count';
   }
@@ -4470,18 +4414,11 @@ class _Strings {
     _ => 'Подключение: $name',
   };
 
-  String xrayRequiredFor(VpnProfileKind kind) => switch (this) {
+  String unsupportedProtocol(VpnProfileKind kind) => switch (this) {
     _Strings.en =>
-      '${kind.label} requires the Xray/libXray engine. This Android build uses sing-box, so the current VPN connection was left unchanged.',
+      '${kind.label} is not enabled in this Android build. Use VLESS Reality or Hysteria/Hysteria2.',
     _ =>
-      '${kind.label} требует Xray/libXray движок. Эта Android-сборка работает на sing-box, поэтому текущее VPN-подключение оставлено без изменений.',
-  };
-
-  String xrayArm64Only(VpnProfileKind kind) => switch (this) {
-    _Strings.en =>
-      '${kind.label} requires the bundled Xray core. It is available only on arm64-v8a phones in this build.',
-    _ =>
-      '${kind.label} требует встроенный Xray core. В этой сборке он доступен только на arm64-v8a телефонах.',
+      '${kind.label} отключён в этой Android-сборке. Используй VLESS Reality или Hysteria/Hysteria2.',
   };
 
   String networkRecoveryPaused(String name) => switch (this) {
@@ -4589,6 +4526,8 @@ class _Strings {
   static const ru = _Strings._(
     addProfileHint: 'Добавь подписку Remnawave, QR или отдельный ключ',
     nothingToImport: 'Нечего импортировать.',
+    supportedProtocolsOnly:
+        'В этой сборке поддерживаются только VLESS Reality и Hysteria/Hysteria2.',
     switchingProfile: 'Переключаю профиль...',
     importFirst: 'Сначала импортируй профиль.',
     configSaveFailed: 'sing-box не сохранил config.',
@@ -4610,8 +4549,7 @@ class _Strings {
     openLogsMessage: 'VPN остановлен. Открой логи sing-box.',
     languageChanged: 'Язык переключён',
     addProfile: 'Добавить профиль',
-    importHint:
-        'https://sub... или vless://... или naive+https://... или hy2://...',
+    importHint: 'https://sub... или vless:// Reality или hy2://...',
     importAction: 'Импорт',
     clipboard: 'Буфер',
     scanQr: 'Сканировать QR',
@@ -4681,7 +4619,7 @@ class _Strings {
       _FaqItem(
         question: 'Какие протоколы поддерживаются?',
         answer:
-            'Поддерживаются VLESS Reality/TLS, NaiveProxy, Hysteria2, Hysteria, Remnawave подписки и sing-box JSON. VLESS XHTTP/mKCP работают через экспериментальный Xray bridge на arm64-v8a устройствах.',
+            'В Android-клиенте оставлены два стабильных направления: VLESS Reality и Hysteria/Hysteria2. XHTTP, mKCP, NaiveProxy и raw sing-box JSON не показываются в профилях этой сборки.',
       ),
       _FaqItem(
         question: 'Что делать, если после смены профиля пропал интернет?',
@@ -4712,6 +4650,8 @@ class _Strings {
   static const en = _Strings._(
     addProfileHint: 'Add a Remnawave subscription, QR code, or single key',
     nothingToImport: 'Nothing to import.',
+    supportedProtocolsOnly:
+        'This build supports only VLESS Reality and Hysteria/Hysteria2.',
     switchingProfile: 'Switching profile...',
     importFirst: 'Import a profile first.',
     configSaveFailed: 'sing-box did not save the config.',
@@ -4733,8 +4673,7 @@ class _Strings {
     openLogsMessage: 'VPN stopped. Open sing-box logs.',
     languageChanged: 'Language changed',
     addProfile: 'Add profile',
-    importHint:
-        'https://sub... or vless://... or naive+https://... or hy2://...',
+    importHint: 'https://sub... or VLESS Reality or hy2://...',
     importAction: 'Import',
     clipboard: 'Clipboard',
     scanQr: 'Scan QR',
@@ -4803,7 +4742,7 @@ class _Strings {
       _FaqItem(
         question: 'Which protocols are supported?',
         answer:
-            'VLESS Reality/TLS, NaiveProxy, Hysteria2, Hysteria, Remnawave subscriptions, and sing-box JSON are supported. VLESS XHTTP/mKCP run through an experimental Xray bridge on arm64-v8a devices.',
+            'The Android client focuses on the stable pair: VLESS Reality and Hysteria/Hysteria2. XHTTP, mKCP, NaiveProxy, and raw sing-box JSON are hidden in this build.',
       ),
       _FaqItem(
         question: 'What if internet stops after switching profiles?',

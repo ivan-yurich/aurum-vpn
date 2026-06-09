@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.56 - 2026-06-09
+
+- Removed the experimental VLESS XHTTP/mKCP/Xray bridge from the Android app.
+- Deleted the bundled Xray native binary, reducing APK size and simplifying the
+  VPN startup path.
+- The visible Android profile list now focuses on VLESS Reality and
+  Hysteria/Hysteria2; legacy Naive, XHTTP, mKCP, TLS-only VLESS, and raw
+  sing-box JSON profiles are filtered out of the client UI.
+- Updated import hints and FAQ copy to match the supported protocol set.
+
 ## 1.0.55 - 2026-06-09
 
 - Added an Android UID traffic fallback so the in-app session counter and VPN

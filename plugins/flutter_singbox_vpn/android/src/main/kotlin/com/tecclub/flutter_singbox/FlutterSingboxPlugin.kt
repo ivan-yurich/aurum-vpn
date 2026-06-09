@@ -40,7 +40,6 @@ import go.Seq
 import io.nekohasekai.libbox.Libbox
 import io.nekohasekai.libbox.SetupOptions
 import java.io.File
-import java.util.concurrent.TimeUnit
 import com.tecclub.flutter_singbox.utils.StatusClient
 import com.tecclub.flutter_singbox.utils.LogClient
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -218,10 +217,6 @@ class FlutterSingboxPlugin :
     // Job for stop cleanup - can be cancelled when starting new connection
     private var stopCleanupJob: kotlinx.coroutines.Job? = null
 
-    // Optional Xray sidecar process used for VLESS XHTTP/mKCP bridge profiles.
-    private var xrayProcess: Process? = null
-    private var xrayLogJob: kotlinx.coroutines.Job? = null
-    
     // Traffic stats
     private var _trafficStats = MutableStateFlow<Map<String, Any>>(
         mapOf(
@@ -655,16 +650,6 @@ class FlutterSingboxPlugin :
             "stopVPN" -> {
                 stopVPN(result)
             }
-            "startXray" -> {
-                val config = call.argument<String>("config") ?: ""
-                startXray(config, result)
-            }
-            "stopXray" -> {
-                stopXray(result)
-            }
-            "isXrayRunning" -> {
-                result.success(xrayProcess?.isAlive == true)
-            }
             "getVPNStatus" -> {
                 getVPNStatus(result)
             }
@@ -721,123 +706,6 @@ class FlutterSingboxPlugin :
         }
     }
 
-    private fun startXray(config: String, result: Result) {
-        if (config.isBlank()) {
-            result.error("XRAY_EMPTY_CONFIG", "Xray configuration is empty", null)
-            return
-        }
-
-        coroutineScope.launch(Dispatchers.IO) {
-            try {
-                stopXrayProcess()
-
-                val executable = File(context.applicationInfo.nativeLibraryDir, "libxray.so")
-                if (!executable.exists()) {
-                    withContext(Dispatchers.Main) {
-                        result.error(
-                            "XRAY_CORE_MISSING",
-                            "Xray core is not bundled for this CPU architecture",
-                            null
-                        )
-                    }
-                    return@launch
-                }
-
-                if (!executable.canExecute()) {
-                    executable.setExecutable(true)
-                }
-
-                val xrayDir = File(context.filesDir, "xray")
-                if (!xrayDir.exists()) {
-                    xrayDir.mkdirs()
-                }
-                val configFile = File(xrayDir, "config.json")
-                configFile.writeText(config)
-
-                val process = ProcessBuilder(
-                    executable.absolutePath,
-                    "run",
-                    "-config",
-                    configFile.absolutePath
-                )
-                    .directory(xrayDir)
-                    .redirectErrorStream(true)
-                    .start()
-
-                xrayProcess = process
-                xrayLogJob = coroutineScope.launch(Dispatchers.IO) {
-                    try {
-                        process.inputStream.bufferedReader().useLines { lines ->
-                            lines.forEach { line ->
-                                appendLog("XRAY $line")
-                            }
-                        }
-                    } catch (error: Exception) {
-                        appendLog("XRAY log reader stopped: ${error.message ?: "unknown"}")
-                    }
-                }
-
-                kotlinx.coroutines.delay(700)
-                if (!process.isAlive) {
-                    val exitCode = runCatching { process.exitValue() }.getOrDefault(-1)
-                    xrayProcess = null
-                    xrayLogJob?.cancel()
-                    xrayLogJob = null
-                    withContext(Dispatchers.Main) {
-                        result.error(
-                            "XRAY_START_FAILED",
-                            "Xray core exited during startup, code=$exitCode",
-                            null
-                        )
-                    }
-                    return@launch
-                }
-
-                appendLog("XRAY started as local bridge")
-                withContext(Dispatchers.Main) {
-                    result.success(true)
-                }
-            } catch (error: Exception) {
-                appendLog("XRAY start failed: ${error.message ?: "unknown"}")
-                withContext(Dispatchers.Main) {
-                    result.error("XRAY_START_ERROR", error.message, null)
-                }
-            }
-        }
-    }
-
-    private fun stopXray(result: Result) {
-        coroutineScope.launch(Dispatchers.IO) {
-            try {
-                stopXrayProcess()
-                withContext(Dispatchers.Main) {
-                    result.success(true)
-                }
-            } catch (error: Exception) {
-                withContext(Dispatchers.Main) {
-                    result.error("XRAY_STOP_ERROR", error.message, null)
-                }
-            }
-        }
-    }
-
-    private fun stopXrayProcess() {
-        xrayLogJob?.cancel()
-        xrayLogJob = null
-        val process = xrayProcess ?: return
-        xrayProcess = null
-        try {
-            process.destroy()
-            if (!process.waitFor(1500, TimeUnit.MILLISECONDS)) {
-                process.destroyForcibly()
-                process.waitFor(1500, TimeUnit.MILLISECONDS)
-            }
-            appendLog("XRAY stopped")
-        } catch (error: Exception) {
-            appendLog("XRAY stop cleanup failed: ${error.message ?: "unknown"}")
-        }
-    }
-    
     private fun setNotificationTitle(title: String, result: Result) {
         try {
             SimpleConfigManager.setNotificationTitle(title)

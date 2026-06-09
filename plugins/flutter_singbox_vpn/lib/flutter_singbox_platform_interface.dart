@@ -47,21 +47,6 @@ abstract class FlutterSingboxPlatform extends PlatformInterface {
     throw UnimplementedError('stopVPN() has not been implemented.');
   }
 
-  /// Start packaged Xray core as a local proxy process.
-  Future<bool> startXray(String config) {
-    throw UnimplementedError('startXray() has not been implemented.');
-  }
-
-  /// Stop packaged Xray core if it is running.
-  Future<bool> stopXray() {
-    throw UnimplementedError('stopXray() has not been implemented.');
-  }
-
-  /// Returns true when the packaged Xray core is running.
-  Future<bool> isXrayRunning() {
-    throw UnimplementedError('isXrayRunning() has not been implemented.');
-  }
-
   /// Get current VPN status
   Future<String> getVPNStatus() {
     throw UnimplementedError('getVPNStatus() has not been implemented.');

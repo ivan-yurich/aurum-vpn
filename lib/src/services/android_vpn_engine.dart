@@ -70,15 +70,6 @@ class AndroidVpnEngine implements VpnEngine {
   Future<bool> stopVPN() => _singBox.stopVPN();
 
   @override
-  Future<bool> startXray(String config) => _singBox.startXray(config);
-
-  @override
-  Future<bool> stopXray() => _singBox.stopXray();
-
-  @override
-  Future<bool> isXrayRunning() => _singBox.isXrayRunning();
-
-  @override
   Future<List<String>> getLogs() => _singBox.getLogs();
 
   @override
