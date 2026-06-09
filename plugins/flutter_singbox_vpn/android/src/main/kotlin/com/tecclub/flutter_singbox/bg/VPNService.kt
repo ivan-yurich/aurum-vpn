@@ -64,6 +64,11 @@ class VPNService : VpnService(), PlatformInterfaceWrapper {
         super.onDestroy()
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        service.onTaskRemoved()
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onRevoke() {
         service.onRevoke()
         super.onRevoke()

@@ -77,6 +77,17 @@ object SimpleConfigManager {
         val config = getConfig()
         return config.isNotEmpty() && config != DEFAULT_CONFIG
     }
+
+    fun hasValidConfig(context: Context): Boolean {
+        return try {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            val config = prefs.getString(KEY_CONFIG, DEFAULT_CONFIG) ?: DEFAULT_CONFIG
+            config.isNotEmpty() && config != DEFAULT_CONFIG
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to check config with context", e)
+            false
+        }
+    }
     
     // Set auto-start setting
     fun setAutoStart(enabled: Boolean) {
@@ -169,5 +180,15 @@ object SimpleConfigManager {
     fun getStartedByUser(): Boolean {
         val prefs = Application.application.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
         return prefs.getBoolean(KEY_STARTED_BY_USER, false)
+    }
+
+    fun getStartedByUser(context: Context): Boolean {
+        return try {
+            val prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+            prefs.getBoolean(KEY_STARTED_BY_USER, false)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get started-by-user setting with context", e)
+            false
+        }
     }
 }

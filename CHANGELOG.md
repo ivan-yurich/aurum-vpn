@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.46 - 2026-06-09
+
+- Strengthened the native Android VPN keeper for overnight and idle-phone use.
+- Restored `WAKE_LOCK` and boot restore permissions so the foreground VPN
+  service can keep checking the tunnel and recover after reboot/update.
+- Added boot/package-replaced restore when VPN was previously enabled by the
+  user and a valid config is saved.
+- Added sticky service recovery when Android removes the task or destroys the
+  service unexpectedly.
+- Moved the native watchdog to a less noisy one-minute cadence with three failed
+  probes before restarting sing-box, reducing false reconnects while still
+  restoring dead tunnels in the background.
+
 ## 1.0.45 - 2026-06-08
 
 - Reworked the lower app area into a single cleaner center panel with contact

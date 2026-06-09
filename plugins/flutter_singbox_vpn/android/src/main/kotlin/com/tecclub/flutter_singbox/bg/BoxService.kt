@@ -6,7 +6,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.PowerManager
 import androidx.annotation.RequiresApi
@@ -45,9 +47,11 @@ class BoxService(
         const val EXTRA_CONFIG_CONTENT = "config_content"
         private const val WATCHDOG_MIXED_PROXY_PORT = 20808
         private const val WATCHDOG_INITIAL_GRACE_MS = 30_000L
-        private const val WATCHDOG_INTERVAL_MS = 20_000L
-        private const val WATCHDOG_RESTART_COOLDOWN_MS = 45_000L
-        private const val WATCHDOG_FAILURE_LIMIT = 2
+        private const val WATCHDOG_INTERVAL_MS = 60_000L
+        private const val WATCHDOG_RESTART_COOLDOWN_MS = 90_000L
+        private const val WATCHDOG_FAILURE_LIMIT = 3
+        private const val KEEPER_WAKE_LOCK_MS = 10 * 60 * 1000L
+        private const val STICKY_RESTART_DELAY_MS = 2_500L
 
         fun start() {
             val intent = runBlocking {
@@ -83,6 +87,7 @@ class BoxService(
     private var watchdogMixedProxyEnabled = false
     private var lastWatchdogRestartAt = 0L
     @Volatile private var watchdogRestarting = false
+    private var keeperWakeLock: PowerManager.WakeLock? = null
     private var receiverRegistered = false
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -96,6 +101,7 @@ class BoxService(
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                         serviceUpdateIdleMode()
                     }
+                    refreshKeeperWakeLock("idle-mode")
                 }
             }
         }
@@ -177,6 +183,7 @@ class BoxService(
             
             android.util.Log.e("BoxService", "Starting notification")
             notification.start()
+            refreshKeeperWakeLock("service-start")
             startNativeWatchdog()
             
             android.util.Log.e("BoxService", "Service startup complete")
@@ -237,6 +244,7 @@ class BoxService(
             "Device idle mode changed; keeping foreground VPN command server awake"
         )
         commandServer?.wake()
+        refreshKeeperWakeLock("device-idle")
     }
 
     @OptIn(DelicateCoroutinesApi::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -250,6 +258,7 @@ class BoxService(
     private fun stopService() {
         if (status.value != Status.Started && status.value != Status.Starting) return
         stopNativeWatchdog()
+        releaseKeeperWakeLock()
         status.value = Status.Stopping
         
 
@@ -300,6 +309,7 @@ class BoxService(
     private suspend fun stopAndAlert(type: Alert, message: String? = null) {
         android.util.Log.e("BoxService", "stopAndAlert called: ${type.name}, message: $message")
         stopNativeWatchdog()
+        releaseKeeperWakeLock()
         runCatching {
             SimpleConfigManager.setStartedByUser(false)
         }
@@ -407,7 +417,11 @@ class BoxService(
     }
 
     internal fun onDestroy() {
+        val shouldRestore = runCatching {
+            SimpleConfigManager.getStartedByUser() && SimpleConfigManager.hasValidConfig()
+        }.getOrDefault(false)
         stopNativeWatchdog()
+        releaseKeeperWakeLock()
         runCatching {
             if (receiverRegistered) {
                 service.unregisterReceiver(receiver)
@@ -439,6 +453,18 @@ class BoxService(
             }
         )
         binder.close()
+        if (shouldRestore) {
+            scheduleStickyRestart("service-destroyed")
+        }
+    }
+
+    internal fun onTaskRemoved() {
+        val shouldRestore = runCatching {
+            SimpleConfigManager.getStartedByUser() && SimpleConfigManager.hasValidConfig()
+        }.getOrDefault(false)
+        if (shouldRestore) {
+            scheduleStickyRestart("task-removed")
+        }
     }
 
     internal fun onRevoke() {
@@ -478,7 +504,10 @@ class BoxService(
         watchdogJob = GlobalScope.launch(Dispatchers.IO) {
             delay(WATCHDOG_INITIAL_GRACE_MS)
             while (isActive && status.value == Status.Started) {
-                if (DefaultNetworkMonitor.defaultNetwork == null) {
+                refreshKeeperWakeLock("watchdog")
+                commandServer?.wake()
+
+                if (!hasDefaultNetwork()) {
                     watchdogFailures = 0
                     android.util.Log.w("BoxService", "Watchdog: waiting for default network")
                     withContext(Dispatchers.Main) {
@@ -529,6 +558,7 @@ class BoxService(
         lastWatchdogRestartAt = now
         try {
             android.util.Log.w("BoxService", "Watchdog: restarting sing-box after $reason")
+            refreshKeeperWakeLock("watchdog-restart")
             status.postValue(Status.Starting)
             broadcastStatus(Status.Starting)
             withContext(Dispatchers.Main) {
@@ -588,5 +618,66 @@ class BoxService(
         }
 
         return false
+    }
+
+    private fun hasDefaultNetwork(): Boolean {
+        if (DefaultNetworkMonitor.defaultNetwork != null) {
+            return true
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val activeNetwork = runCatching { Application.connectivity.activeNetwork }.getOrNull()
+            if (activeNetwork != null) {
+                DefaultNetworkMonitor.defaultNetwork = activeNetwork
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun refreshKeeperWakeLock(reason: String) {
+        try {
+            val powerManager = service.getSystemService(Context.POWER_SERVICE) as PowerManager
+            val wakeLock = keeperWakeLock ?: powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "YurichConnect:VpnKeeper"
+            ).apply {
+                setReferenceCounted(false)
+                keeperWakeLock = this
+            }
+
+            if (wakeLock.isHeld) {
+                runCatching { wakeLock.release() }
+            }
+            wakeLock.acquire(KEEPER_WAKE_LOCK_MS)
+            android.util.Log.d("BoxService", "Keeper wake lock refreshed: $reason")
+        } catch (e: Exception) {
+            android.util.Log.w("BoxService", "Keeper wake lock failed: ${e.message}")
+        }
+    }
+
+    private fun releaseKeeperWakeLock() {
+        val wakeLock = keeperWakeLock ?: return
+        if (wakeLock.isHeld) {
+            runCatching { wakeLock.release() }
+        }
+        keeperWakeLock = null
+    }
+
+    private fun scheduleStickyRestart(reason: String) {
+        android.util.Log.w("BoxService", "Scheduling sticky restart after $reason")
+        Handler(Looper.getMainLooper()).postDelayed({
+            val shouldRestore = runCatching {
+                SimpleConfigManager.getStartedByUser() && SimpleConfigManager.hasValidConfig()
+            }.getOrDefault(false)
+            if (!shouldRestore) {
+                android.util.Log.w("BoxService", "Sticky restart skipped: user flag/config missing")
+                return@postDelayed
+            }
+
+            val intent = Intent(service.applicationContext, Settings.serviceClass()).apply {
+                action = ACTION_START
+            }
+            ContextCompat.startForegroundService(service.applicationContext, intent)
+        }, STICKY_RESTART_DELAY_MS)
     }
 }
