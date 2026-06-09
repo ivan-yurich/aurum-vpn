@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.55 - 2026-06-09
+
+- Added an Android UID traffic fallback so the in-app session counter and VPN
+  notification can still show traffic when sing-box status totals stay at zero.
+- Added a clear user-facing message for VLESS XHTTP/mKCP on non-arm64 devices:
+  the bundled Xray bridge is available only for `arm64-v8a` in this build.
+- Updated FAQ copy to describe the new experimental Xray bridge instead of the
+  old "future engine" wording.
+
 ## 1.0.54 - 2026-06-09
 
 - Added an experimental Android Xray sidecar bridge for imported VLESS XHTTP

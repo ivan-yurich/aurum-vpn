@@ -33,7 +33,7 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.54';
+const _appVersion = '1.0.55';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
@@ -907,11 +907,19 @@ class _HomeScreenState extends State<HomeScreen>
     var xrayBridgeStarted = false;
     if (_usesXrayBridge(profile)) {
       xrayBridge = _xrayConfigBuilder.buildBridge(profile);
-      final xrayStarted = await _nativeCall(
-        'startXray',
-        _vpnEngine.startXray(xrayBridge.xrayConfig),
-        timeout: _nativeXrayTimeout,
-      );
+      bool xrayStarted;
+      try {
+        xrayStarted = await _nativeCall(
+          'startXray',
+          _vpnEngine.startXray(xrayBridge.xrayConfig),
+          timeout: _nativeXrayTimeout,
+        );
+      } on PlatformException catch (error) {
+        if (error.code == 'XRAY_BINARY_MISSING') {
+          throw StateError(s.xrayArm64Only(profile.kind));
+        }
+        rethrow;
+      }
       if (!xrayStarted) {
         throw StateError('Xray core не запустился для ${profile.kind.label}.');
       }
@@ -4469,6 +4477,13 @@ class _Strings {
       '${kind.label} требует Xray/libXray движок. Эта Android-сборка работает на sing-box, поэтому текущее VPN-подключение оставлено без изменений.',
   };
 
+  String xrayArm64Only(VpnProfileKind kind) => switch (this) {
+    _Strings.en =>
+      '${kind.label} requires the bundled Xray core. It is available only on arm64-v8a phones in this build.',
+    _ =>
+      '${kind.label} требует встроенный Xray core. В этой сборке он доступен только на arm64-v8a телефонах.',
+  };
+
   String networkRecoveryPaused(String name) => switch (this) {
     _Strings.en =>
       'Mobile network is unstable. Auto reconnect is paused for $name.',
@@ -4666,7 +4681,7 @@ class _Strings {
       _FaqItem(
         question: 'Какие протоколы поддерживаются?',
         answer:
-            'Поддерживаются VLESS Reality/TLS, NaiveProxy, Hysteria2, Hysteria, Remnawave подписки и sing-box JSON. VLESS XHTTP/mKCP импортируются и будут готовы к подключению после добавления Xray-движка.',
+            'Поддерживаются VLESS Reality/TLS, NaiveProxy, Hysteria2, Hysteria, Remnawave подписки и sing-box JSON. VLESS XHTTP/mKCP работают через экспериментальный Xray bridge на arm64-v8a устройствах.',
       ),
       _FaqItem(
         question: 'Что делать, если после смены профиля пропал интернет?',
@@ -4788,7 +4803,7 @@ class _Strings {
       _FaqItem(
         question: 'Which protocols are supported?',
         answer:
-            'VLESS Reality/TLS, NaiveProxy, Hysteria2, Hysteria, Remnawave subscriptions, and sing-box JSON are supported. VLESS XHTTP/mKCP are imported and will be connectable after the Xray engine is added.',
+            'VLESS Reality/TLS, NaiveProxy, Hysteria2, Hysteria, Remnawave subscriptions, and sing-box JSON are supported. VLESS XHTTP/mKCP run through an experimental Xray bridge on arm64-v8a devices.',
       ),
       _FaqItem(
         question: 'What if internet stops after switching profiles?',

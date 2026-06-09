@@ -240,6 +240,11 @@ class FlutterSingboxPlugin :
     // Session data tracking
     private var sessionStartUplinkTotal = 0L
     private var sessionStartDownlinkTotal = 0L
+    private var sessionStartUidTxBytes = -1L
+    private var sessionStartUidRxBytes = -1L
+    private var lastUidTxBytes = -1L
+    private var lastUidRxBytes = -1L
+    private var lastUidTrafficSampleAt = 0L
     private var lastNotificationUpdateAt = 0L
     
     // VPN permission request code
@@ -1048,6 +1053,7 @@ class FlutterSingboxPlugin :
             // Reset session traffic counters
             sessionStartUplinkTotal = 0
             sessionStartDownlinkTotal = 0
+            resetUidTrafficSession()
             
             // Start the service using proper method
             android.util.Log.e("FlutterSingboxPlugin", "Calling startService method")
@@ -1374,6 +1380,7 @@ class FlutterSingboxPlugin :
                 // Reset session traffic counters when connection starts
                 sessionStartUplinkTotal = 0
                 sessionStartDownlinkTotal = 0
+                resetUidTrafficSession()
             }
             Status.Stopped -> {
                 android.util.Log.e("FlutterSingboxPlugin", "Service stopped, disconnecting status client")
@@ -1399,6 +1406,7 @@ class FlutterSingboxPlugin :
                     "formattedSessionDownlink" to "0 B",
                     "formattedSessionTotal" to "0 B"
                 )
+                resetUidTrafficSession()
             }
             else -> {
                 // Starting or Stopping - no action needed
@@ -1418,6 +1426,8 @@ class FlutterSingboxPlugin :
     
     // StatusClient.Handler implementation
     override fun onStatusUpdate(status: StatusMessage) {
+        val uidSample = sampleUidTraffic()
+
         // When first status update comes, set session start values
         if (sessionStartUplinkTotal == 0L && sessionStartDownlinkTotal == 0L && status.uplinkTotal > 0) {
             sessionStartUplinkTotal = status.uplinkTotal
@@ -1425,24 +1435,38 @@ class FlutterSingboxPlugin :
         }
         
         // Calculate session data (data transferred since connection started)
-        val sessionUplink = status.uplinkTotal - sessionStartUplinkTotal
-        val sessionDownlink = status.downlinkTotal - sessionStartDownlinkTotal
+        val singBoxSessionUplink = (status.uplinkTotal - sessionStartUplinkTotal).coerceAtLeast(0L)
+        val singBoxSessionDownlink = (status.downlinkTotal - sessionStartDownlinkTotal).coerceAtLeast(0L)
+        val sessionUplink = if (singBoxSessionUplink > 0L || status.uplink > 0L) {
+            singBoxSessionUplink
+        } else {
+            uidSample.sessionTx
+        }
+        val sessionDownlink = if (singBoxSessionDownlink > 0L || status.downlink > 0L) {
+            singBoxSessionDownlink
+        } else {
+            uidSample.sessionRx
+        }
+        val uplinkSpeed = if (status.uplink > 0L) status.uplink else uidSample.txSpeed
+        val downlinkSpeed = if (status.downlink > 0L) status.downlink else uidSample.rxSpeed
+        val uplinkTotal = if (status.uplinkTotal > 0L) status.uplinkTotal else uidSample.txTotal
+        val downlinkTotal = if (status.downlinkTotal > 0L) status.downlinkTotal else uidSample.rxTotal
         
         // Update traffic stats
         val stats = mapOf(
-            "uplinkSpeed" to status.uplink,
-            "downlinkSpeed" to status.downlink,
-            "uplinkTotal" to status.uplinkTotal,
-            "downlinkTotal" to status.downlinkTotal,
+            "uplinkSpeed" to uplinkSpeed,
+            "downlinkSpeed" to downlinkSpeed,
+            "uplinkTotal" to uplinkTotal,
+            "downlinkTotal" to downlinkTotal,
             "connectionsIn" to status.connectionsIn,
             "connectionsOut" to status.connectionsOut,
             "sessionUplink" to sessionUplink,
             "sessionDownlink" to sessionDownlink,
             "sessionTotal" to (sessionUplink + sessionDownlink),
-            "formattedUplinkSpeed" to TrafficStats.formatBytes(status.uplink) + "/s",
-            "formattedDownlinkSpeed" to TrafficStats.formatBytes(status.downlink) + "/s",
-            "formattedUplinkTotal" to TrafficStats.formatBytes(status.uplinkTotal),
-            "formattedDownlinkTotal" to TrafficStats.formatBytes(status.downlinkTotal),
+            "formattedUplinkSpeed" to TrafficStats.formatBytes(uplinkSpeed) + "/s",
+            "formattedDownlinkSpeed" to TrafficStats.formatBytes(downlinkSpeed) + "/s",
+            "formattedUplinkTotal" to TrafficStats.formatBytes(uplinkTotal),
+            "formattedDownlinkTotal" to TrafficStats.formatBytes(downlinkTotal),
             "formattedSessionUplink" to TrafficStats.formatBytes(sessionUplink),
             "formattedSessionDownlink" to TrafficStats.formatBytes(sessionDownlink),
             "formattedSessionTotal" to TrafficStats.formatBytes(sessionUplink + sessionDownlink)
@@ -1456,6 +1480,74 @@ class FlutterSingboxPlugin :
         handler.post {
             trafficEventSink?.success(stats)
         }
+    }
+
+    private data class UidTrafficSample(
+        val txTotal: Long,
+        val rxTotal: Long,
+        val txSpeed: Long,
+        val rxSpeed: Long,
+        val sessionTx: Long,
+        val sessionRx: Long
+    )
+
+    private fun resetUidTrafficSession() {
+        val tx = readUidTxBytes()
+        val rx = readUidRxBytes()
+        sessionStartUidTxBytes = tx
+        sessionStartUidRxBytes = rx
+        lastUidTxBytes = tx
+        lastUidRxBytes = rx
+        lastUidTrafficSampleAt = System.currentTimeMillis()
+    }
+
+    private fun sampleUidTraffic(): UidTrafficSample {
+        val now = System.currentTimeMillis()
+        val tx = readUidTxBytes()
+        val rx = readUidRxBytes()
+        if (tx < 0L || rx < 0L) {
+            return UidTrafficSample(0L, 0L, 0L, 0L, 0L, 0L)
+        }
+
+        if (sessionStartUidTxBytes < 0L || sessionStartUidRxBytes < 0L) {
+            sessionStartUidTxBytes = tx
+            sessionStartUidRxBytes = rx
+        }
+
+        val elapsedMs = (now - lastUidTrafficSampleAt).coerceAtLeast(1L)
+        val txSpeed = if (lastUidTxBytes >= 0L) {
+            ((tx - lastUidTxBytes).coerceAtLeast(0L) * 1000L) / elapsedMs
+        } else {
+            0L
+        }
+        val rxSpeed = if (lastUidRxBytes >= 0L) {
+            ((rx - lastUidRxBytes).coerceAtLeast(0L) * 1000L) / elapsedMs
+        } else {
+            0L
+        }
+
+        lastUidTxBytes = tx
+        lastUidRxBytes = rx
+        lastUidTrafficSampleAt = now
+
+        return UidTrafficSample(
+            txTotal = tx,
+            rxTotal = rx,
+            txSpeed = txSpeed,
+            rxSpeed = rxSpeed,
+            sessionTx = (tx - sessionStartUidTxBytes).coerceAtLeast(0L),
+            sessionRx = (rx - sessionStartUidRxBytes).coerceAtLeast(0L)
+        )
+    }
+
+    private fun readUidTxBytes(): Long {
+        val value = android.net.TrafficStats.getUidTxBytes(context.applicationInfo.uid)
+        return if (value == android.net.TrafficStats.UNSUPPORTED.toLong()) -1L else value
+    }
+
+    private fun readUidRxBytes(): Long {
+        val value = android.net.TrafficStats.getUidRxBytes(context.applicationInfo.uid)
+        return if (value == android.net.TrafficStats.UNSUPPORTED.toLong()) -1L else value
     }
 
     private fun updateTrafficNotification(stats: Map<String, Any>) {
