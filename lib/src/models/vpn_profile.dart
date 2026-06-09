@@ -23,12 +23,12 @@ extension VpnProfileKindLabel on VpnProfileKind {
 
   bool get isClientSupported => switch (this) {
     VpnProfileKind.vlessReality ||
+    VpnProfileKind.naive ||
     VpnProfileKind.hysteria2 ||
     VpnProfileKind.hysteria => true,
     VpnProfileKind.vlessTls ||
     VpnProfileKind.vlessXhttp ||
     VpnProfileKind.vlessMkcp ||
-    VpnProfileKind.naive ||
     VpnProfileKind.singBoxConfig => false,
   };
 }

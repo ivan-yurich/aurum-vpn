@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.57 - 2026-06-09
+
+- Restored NaiveProxy support in the Android client while keeping the Xray
+  bridge, VLESS XHTTP, and VLESS mKCP disabled.
+- Brought back the Naive profile tab, import hints, QR helper text, and FAQ
+  wording for the supported stable set: VLESS Reality, NaiveProxy, and
+  Hysteria/Hysteria2.
+- Kept the reduced APK footprint from removing the bundled Xray binary.
+
 ## 1.0.56 - 2026-06-09
 
 - Removed the experimental VLESS XHTTP/mKCP/Xray bridge from the Android app.

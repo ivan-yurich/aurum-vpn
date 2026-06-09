@@ -32,7 +32,7 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.56';
+const _appVersion = '1.0.57';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
@@ -68,7 +68,7 @@ enum _AppLanguage {
   }
 }
 
-enum _ProfileTab { all, vless, hysteria }
+enum _ProfileTab { all, vless, naive, hysteria }
 
 enum _SupportTab { help, community }
 
@@ -84,11 +84,11 @@ class _ProfileConnectionBlocked implements Exception {
 _ProfileTab _profileTabForKind(VpnProfileKind kind) {
   return switch (kind) {
     VpnProfileKind.vlessReality => _ProfileTab.vless,
+    VpnProfileKind.naive => _ProfileTab.naive,
     VpnProfileKind.hysteria2 || VpnProfileKind.hysteria => _ProfileTab.hysteria,
     VpnProfileKind.vlessTls ||
     VpnProfileKind.vlessXhttp ||
     VpnProfileKind.vlessMkcp ||
-    VpnProfileKind.naive ||
     VpnProfileKind.singBoxConfig => _ProfileTab.all,
   };
 }
@@ -4373,6 +4373,7 @@ class _Strings {
         _ => 'Все',
       },
       _ProfileTab.vless => 'VLESS',
+      _ProfileTab.naive => 'Naive',
       _ProfileTab.hysteria => 'Hysteria',
     };
     return '$label $count';
@@ -4416,9 +4417,9 @@ class _Strings {
 
   String unsupportedProtocol(VpnProfileKind kind) => switch (this) {
     _Strings.en =>
-      '${kind.label} is not enabled in this Android build. Use VLESS Reality or Hysteria/Hysteria2.',
+      '${kind.label} is not enabled in this Android build. Use VLESS Reality, NaiveProxy, or Hysteria/Hysteria2.',
     _ =>
-      '${kind.label} отключён в этой Android-сборке. Используй VLESS Reality или Hysteria/Hysteria2.',
+      '${kind.label} отключён в этой Android-сборке. Используй VLESS Reality, NaiveProxy или Hysteria/Hysteria2.',
   };
 
   String networkRecoveryPaused(String name) => switch (this) {
@@ -4527,7 +4528,7 @@ class _Strings {
     addProfileHint: 'Добавь подписку Remnawave, QR или отдельный ключ',
     nothingToImport: 'Нечего импортировать.',
     supportedProtocolsOnly:
-        'В этой сборке поддерживаются только VLESS Reality и Hysteria/Hysteria2.',
+        'В этой сборке поддерживаются VLESS Reality, NaiveProxy и Hysteria/Hysteria2.',
     switchingProfile: 'Переключаю профиль...',
     importFirst: 'Сначала импортируй профиль.',
     configSaveFailed: 'sing-box не сохранил config.',
@@ -4549,7 +4550,8 @@ class _Strings {
     openLogsMessage: 'VPN остановлен. Открой логи sing-box.',
     languageChanged: 'Язык переключён',
     addProfile: 'Добавить профиль',
-    importHint: 'https://sub... или vless:// Reality или hy2://...',
+    importHint:
+        'https://sub... или vless:// Reality или naive+https://... или hy2://...',
     importAction: 'Импорт',
     clipboard: 'Буфер',
     scanQr: 'Сканировать QR',
@@ -4619,7 +4621,7 @@ class _Strings {
       _FaqItem(
         question: 'Какие протоколы поддерживаются?',
         answer:
-            'В Android-клиенте оставлены два стабильных направления: VLESS Reality и Hysteria/Hysteria2. XHTTP, mKCP, NaiveProxy и raw sing-box JSON не показываются в профилях этой сборки.',
+            'В Android-клиенте оставлены стабильные направления: VLESS Reality, NaiveProxy и Hysteria/Hysteria2. XHTTP, mKCP, TLS-only VLESS и raw sing-box JSON не показываются в профилях этой сборки.',
       ),
       _FaqItem(
         question: 'Что делать, если после смены профиля пропал интернет?',
@@ -4651,7 +4653,7 @@ class _Strings {
     addProfileHint: 'Add a Remnawave subscription, QR code, or single key',
     nothingToImport: 'Nothing to import.',
     supportedProtocolsOnly:
-        'This build supports only VLESS Reality and Hysteria/Hysteria2.',
+        'This build supports VLESS Reality, NaiveProxy, and Hysteria/Hysteria2.',
     switchingProfile: 'Switching profile...',
     importFirst: 'Import a profile first.',
     configSaveFailed: 'sing-box did not save the config.',
@@ -4673,7 +4675,8 @@ class _Strings {
     openLogsMessage: 'VPN stopped. Open sing-box logs.',
     languageChanged: 'Language changed',
     addProfile: 'Add profile',
-    importHint: 'https://sub... or VLESS Reality or hy2://...',
+    importHint:
+        'https://sub... or VLESS Reality or naive+https://... or hy2://...',
     importAction: 'Import',
     clipboard: 'Clipboard',
     scanQr: 'Scan QR',
@@ -4742,7 +4745,7 @@ class _Strings {
       _FaqItem(
         question: 'Which protocols are supported?',
         answer:
-            'The Android client focuses on the stable pair: VLESS Reality and Hysteria/Hysteria2. XHTTP, mKCP, NaiveProxy, and raw sing-box JSON are hidden in this build.',
+            'The Android client focuses on stable profiles: VLESS Reality, NaiveProxy, and Hysteria/Hysteria2. XHTTP, mKCP, TLS-only VLESS, and raw sing-box JSON are hidden in this build.',
       ),
       _FaqItem(
         question: 'What if internet stops after switching profiles?',

@@ -31,7 +31,7 @@ class SingBoxConfigBuilder {
         profile.kind != VpnProfileKind.naive) {
       throw UnsupportedError(
         '${profile.kind.label} отключён в этой Android-сборке. '
-        'Используй VLESS Reality или Hysteria/Hysteria2.',
+        'Используй VLESS Reality, NaiveProxy или Hysteria/Hysteria2.',
       );
     }
 
