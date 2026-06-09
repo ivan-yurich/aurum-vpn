@@ -2294,7 +2294,8 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   Widget build(BuildContext context) {
     final selected = _selectedProfile;
-    final activeProfileId = _connected ? selected?.id : null;
+    final selectedProfileId = _selectedProfileId ?? selected?.id;
+    final activeProfileId = _connected ? selectedProfileId : null;
 
     return Scaffold(
       appBar: AppBar(
@@ -2339,6 +2340,7 @@ class _HomeScreenState extends State<HomeScreen>
                   uplink: _uplink,
                   downlink: _downlink,
                   uptime: _formatDuration(_connectedDuration),
+                  total: _sessionTotal,
                   onToggle: _toggleVpn,
                   toggleEnabled: !_busy && selected != null,
                 ),
@@ -2352,7 +2354,7 @@ class _HomeScreenState extends State<HomeScreen>
                       strings: s,
                       profiles: _profiles,
                       selectedProfile: selected,
-                      selectedId: selected?.id,
+                      selectedId: selectedProfileId,
                       activeProfileId: activeProfileId,
                       selectedTab: _profileTab,
                       onTabChanged: (tab) => setState(() => _profileTab = tab),
@@ -2436,6 +2438,7 @@ class _StatusPanel extends StatelessWidget {
     required this.uplink,
     required this.downlink,
     required this.uptime,
+    required this.total,
     required this.onToggle,
     required this.toggleEnabled,
   });
@@ -2448,6 +2451,7 @@ class _StatusPanel extends StatelessWidget {
   final String uplink;
   final String downlink;
   final String uptime;
+  final String total;
   final VoidCallback onToggle;
   final bool toggleEnabled;
 
@@ -2477,7 +2481,7 @@ class _StatusPanel extends StatelessWidget {
       builder: (context, child) {
         final glowPower = connected || degraded ? pulse.value : 0.0;
         return SizedBox(
-          height: 212,
+          height: 166,
           child: DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -2504,7 +2508,10 @@ class _StatusPanel extends StatelessWidget {
                 ),
               ],
             ),
-            child: Padding(padding: const EdgeInsets.all(16), child: child),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+              child: child,
+            ),
           ),
         );
       },
@@ -2529,19 +2536,25 @@ class _StatusPanel extends StatelessWidget {
               Expanded(
                 child: Text(
                   statusLabel,
-                  style: Theme.of(context).textTheme.headlineSmall,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 5),
           Text(
             message,
-            maxLines: 2,
+            maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: _mutedGold),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -2554,6 +2567,7 @@ class _StatusPanel extends StatelessWidget {
                 connected: connected,
                 degraded: degraded,
                 uptime: uptime,
+                total: total,
                 enabled: toggleEnabled,
                 onPressed: onToggle,
               ),
@@ -2575,6 +2589,7 @@ class _UptimeButton extends StatelessWidget {
     required this.connected,
     required this.degraded,
     required this.uptime,
+    required this.total,
     required this.enabled,
     required this.onPressed,
   });
@@ -2583,6 +2598,7 @@ class _UptimeButton extends StatelessWidget {
   final bool connected;
   final bool degraded;
   final String uptime;
+  final String total;
   final bool enabled;
   final VoidCallback onPressed;
 
@@ -2648,9 +2664,9 @@ class _UptimeButton extends StatelessWidget {
         customBorder: const CircleBorder(),
         onTap: enabled ? onPressed : null,
         child: SizedBox.square(
-          dimension: 94,
+          dimension: 82,
           child: Padding(
-            padding: const EdgeInsets.all(10),
+            padding: const EdgeInsets.all(8),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -2661,9 +2677,9 @@ class _UptimeButton extends StatelessWidget {
                       ? Icons.timer_outlined
                       : Icons.power_settings_new,
                   color: connected ? _ink : _goldSoft,
-                  size: 24,
+                  size: 21,
                 ),
-                const SizedBox(height: 5),
+                const SizedBox(height: 3),
                 FittedBox(
                   fit: BoxFit.scaleDown,
                   child: Text(
@@ -2673,6 +2689,22 @@ class _UptimeButton extends StatelessWidget {
                       color: connected ? _ink : _goldSoft,
                       fontWeight: FontWeight.w800,
                       fontSize: 16,
+                      letterSpacing: 0,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    total,
+                    maxLines: 1,
+                    style: TextStyle(
+                      color: connected
+                          ? _ink.withValues(alpha: 0.66)
+                          : _mutedGold,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 10,
                       letterSpacing: 0,
                     ),
                   ),
@@ -3159,17 +3191,16 @@ class _ProfileTile extends StatelessWidget {
     return AnimatedBuilder(
       animation: pulse,
       builder: (context, child) {
-        final glowPower = selected ? pulse.value : 0.0;
+        final glowPower = selected || active ? pulse.value : 0.0;
         final borderColor = active
-            ? _cyanGlow.withValues(alpha: 0.9)
+            ? _cyanGlow.withValues(alpha: 0.98)
             : selected
-            ? _goldSoft.withValues(alpha: 0.82)
+            ? _goldSoft.withValues(alpha: 0.92)
             : Colors.white12;
         return InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(8),
           child: Ink(
-            padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               gradient: selected
                   ? const LinearGradient(
@@ -3187,21 +3218,62 @@ class _ProfileTile extends StatelessWidget {
                       colors: [_surface, Color(0xFF0A1723)],
                     ),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: borderColor, width: selected ? 1.4 : 1),
+              border: Border.all(
+                color: borderColor,
+                width: selected || active ? 2 : 1,
+              ),
               boxShadow: selected || active
                   ? [
                       BoxShadow(
                         color: (active ? _cyanGlow : _gold).withValues(
-                          alpha: 0.14 + glowPower * 0.18,
+                          alpha: 0.22 + glowPower * 0.2,
                         ),
-                        blurRadius: 16 + glowPower * 14,
-                        spreadRadius: glowPower,
+                        blurRadius: 22 + glowPower * 16,
+                        spreadRadius: 1 + glowPower * 1.5,
                         offset: const Offset(0, 7),
                       ),
                     ]
                   : null,
             ),
-            child: child,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: Stack(
+                children: [
+                  if (selected || active)
+                    Positioned.fill(
+                      left: 0,
+                      right: null,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: active
+                                ? const [Color(0xFF67E8F9), Color(0xFF0EA5FF)]
+                                : const [Color(0xFFEAF7FF), Color(0xFF67E8F9)],
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: _cyanGlow.withValues(alpha: 0.5),
+                              blurRadius: 12,
+                            ),
+                          ],
+                        ),
+                        child: const SizedBox(width: 5),
+                      ),
+                    ),
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      selected || active ? 18 : 14,
+                      14,
+                      14,
+                      14,
+                    ),
+                    child: child,
+                  ),
+                ],
+              ),
+            ),
           ),
         );
       },

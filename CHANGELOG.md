@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.50 - 2026-06-09
+
+- Made the connection panel more compact so long profile lists get more room on
+  the first screen.
+- Moved the session traffic total into the glowing uptime button under the
+  timer, keeping upload and download counters simpler.
+- Kept the stronger selected-profile frame, left glow strip, and in-card
+  "Active" badge for the currently connected profile.
+
 ## 1.0.49 - 2026-06-09
 
 - Kept the connection/status panel fixed while the profile list scrolls, so the
