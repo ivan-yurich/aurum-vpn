@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.51 - 2026-06-09
+
+- Fixed the in-app version shown to the updater so it matches the Android
+  package version.
+- Hardened update discovery: if the primary JSON endpoint is stale or not newer,
+  the app now continues checking GitHub Releases instead of stopping early.
+- Prepared a fresh GitHub Release so phones can verify the auto-update flow
+  against a newer version than `1.0.50`.
+
 ## 1.0.50 - 2026-06-09
 
 - Made the connection panel more compact so long profile lists get more room on

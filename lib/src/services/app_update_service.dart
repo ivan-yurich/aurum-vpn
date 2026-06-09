@@ -50,13 +50,18 @@ class AppUpdatePermissionException implements Exception {
 }
 
 class AppUpdateService {
-  AppUpdateService({HttpClient? client}) : _client = client ?? HttpClient() {
+  AppUpdateService({HttpClient? client, List<Uri>? releaseApiUris})
+    : _client = client ?? HttpClient(),
+      _releaseApiUris =
+          releaseApiUris ??
+          _releaseApiUrls.map(Uri.parse).toList(growable: false) {
     _client.connectionTimeout = const Duration(seconds: 7);
   }
 
   static const _channel = MethodChannel('online.dnsai.ivanvpn/updater');
 
   final HttpClient _client;
+  final List<Uri> _releaseApiUris;
 
   Future<List<String>> supportedAbis() async {
     if (!Platform.isAndroid) {
@@ -74,16 +79,18 @@ class AppUpdateService {
   }) async {
     Object? lastError;
     var sawEmptyEndpoint = false;
-    for (final value in _releaseApiUrls) {
+    var sawNotNewerRelease = false;
+    for (final uri in _releaseApiUris) {
       try {
-        final release = await _fetchRelease(Uri.parse(value), supportedAbis);
+        final release = await _fetchRelease(uri, supportedAbis);
         if (release == null) {
           sawEmptyEndpoint = true;
           continue;
         }
-        return _isVersionNewer(release.version, currentVersion)
-            ? release
-            : null;
+        if (_isVersionNewer(release.version, currentVersion)) {
+          return release;
+        }
+        sawNotNewerRelease = true;
       } on Object catch (error) {
         lastError = error;
       }
@@ -92,15 +99,16 @@ class AppUpdateService {
     try {
       final release = await _fetchLatestGitHubReleaseViaRedirect(supportedAbis);
       if (release != null) {
-        return _isVersionNewer(release.version, currentVersion)
-            ? release
-            : null;
+        if (_isVersionNewer(release.version, currentVersion)) {
+          return release;
+        }
+        sawNotNewerRelease = true;
       }
     } on Object catch (error) {
       lastError = error;
     }
 
-    if (lastError != null && !sawEmptyEndpoint) {
+    if (lastError != null && !sawEmptyEndpoint && !sawNotNewerRelease) {
       throw StateError('$lastError');
     }
     return null;
