@@ -1,6 +1,8 @@
 enum VpnProfileKind {
   vlessReality,
   vlessTls,
+  vlessXhttp,
+  vlessMkcp,
   naive,
   hysteria2,
   hysteria,
@@ -11,6 +13,8 @@ extension VpnProfileKindLabel on VpnProfileKind {
   String get label => switch (this) {
     VpnProfileKind.vlessReality => 'VLESS Reality',
     VpnProfileKind.vlessTls => 'VLESS TLS',
+    VpnProfileKind.vlessXhttp => 'VLESS XHTTP',
+    VpnProfileKind.vlessMkcp => 'VLESS mKCP',
     VpnProfileKind.naive => 'NaiveProxy',
     VpnProfileKind.hysteria2 => 'Hysteria2',
     VpnProfileKind.hysteria => 'Hysteria',

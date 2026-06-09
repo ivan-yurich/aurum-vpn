@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.48 - 2026-06-09
+
+- Added import and UI recognition for VLESS XHTTP and VLESS mKCP profiles.
+- Kept the current sing-box tunnel safe: XHTTP/mKCP profiles now show a clear
+  Xray/libXray requirement instead of generating an invalid sing-box config.
+- Treated `/s/<token>/` subscription URLs as first-class saved sources, matching
+  providers that do not expose a visible `links.txt` suffix.
+- Updated subscription refresh copy so users can paste either `/s/.../` or
+  `/links.txt` links.
+
+## 1.0.47 - 2026-06-09
+
+- Added a polished Yurich Connect visual layer with a cool blue app gradient,
+  glowing connection card, animated uptime button, highlighted active profile,
+  and richer profile/network panels.
+- Kept animation centralized in one lightweight controller so the interface
+  feels alive without adding VPN timers or touching protocol behavior.
+- Preserved fixed status-card sizing so live traffic numbers do not stretch the
+  connection area while the VPN is running.
+
 ## 1.0.46 - 2026-06-09
 
 - Strengthened the native Android VPN keeper for overnight and idle-phone use.

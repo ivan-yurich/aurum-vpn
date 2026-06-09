@@ -27,6 +27,15 @@ class SingBoxConfigBuilder {
       throw StateError('У профиля нет outbound-конфига.');
     }
 
+    if (profile.kind == VpnProfileKind.vlessXhttp ||
+        profile.kind == VpnProfileKind.vlessMkcp) {
+      throw UnsupportedError(
+        '${profile.kind.label} требует Xray/libXray движок. '
+        'Текущая Android-сборка использует sing-box, который не поддерживает '
+        'этот VLESS transport.',
+      );
+    }
+
     final proxyOutbound =
         jsonDecode(jsonEncode(outbound)) as Map<String, dynamic>;
     proxyOutbound['tag'] = 'proxy';
@@ -160,7 +169,9 @@ class SingBoxConfigBuilder {
     NaiveOutboundMode naiveMode,
   ) {
     if (profile.kind == VpnProfileKind.vlessReality ||
-        profile.kind == VpnProfileKind.vlessTls) {
+        profile.kind == VpnProfileKind.vlessTls ||
+        profile.kind == VpnProfileKind.vlessXhttp ||
+        profile.kind == VpnProfileKind.vlessMkcp) {
       if (proxyOutbound['network'] == 'tcp') {
         proxyOutbound.remove('network');
       }

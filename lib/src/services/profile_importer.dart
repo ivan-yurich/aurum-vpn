@@ -226,7 +226,7 @@ class ProfileImporter {
     }
 
     throw const ProfileImportException(
-      'Не нашёл поддерживаемых ссылок. Поддерживаются vless://, naive+https://, hy2://, hysteria:// и sing-box JSON.',
+      'Не нашёл поддерживаемых ссылок. Поддерживаются vless://, naive+https://, hy2://, hysteria://, sing-box JSON и raw-подписки.',
     );
   }
 
@@ -515,12 +515,15 @@ class ProfileImporter {
       final hasReality =
           reality != null &&
           (reality['enabled'] == true || _truthy('${reality['enabled']}'));
+      final transportType =
+          (_asMap(normalized['transport'])?['type'] as String?)?.toLowerCase();
       return VpnProfile(
         id: _stableId(originalText),
         name: _displayName('', fallback: server),
-        kind: hasReality
-            ? VpnProfileKind.vlessReality
-            : VpnProfileKind.vlessTls,
+        kind: _vlessKind(
+          security: hasReality ? 'reality' : 'tls',
+          transportType: transportType,
+        ),
         originalInput: source.isEmpty ? originalText : source,
         server: server,
         port: port,
@@ -650,6 +653,15 @@ class ProfileImporter {
       if (reality != null &&
           (reality['shortId'] as String?)?.isNotEmpty == true)
         'sid': reality['shortId'] as String,
+      if (_asMap(stream['xhttpSettings'])?['path'] is String)
+        'path': _asMap(stream['xhttpSettings'])!['path'] as String,
+      if (_asMap(stream['splitHTTPSettings'])?['path'] is String)
+        'path': _asMap(stream['splitHTTPSettings'])!['path'] as String,
+      if (_asMap(stream['kcpSettings'])?['header'] is Map)
+        'headerType':
+            ((_asMap(stream['kcpSettings'])!['header'] as Map)['type']
+                as String?) ??
+            '',
     };
 
     final alpn = reality?['alpn'] ?? tls?['alpn'];
@@ -716,6 +728,8 @@ class ProfileImporter {
 
     final query = _query(uri);
     final security = (query['security'] ?? '').toLowerCase();
+    final transportType = _vlessTransportType(query);
+    final unsupportedTransport = _unsupportedVlessTransport(transportType);
     final port = uri.hasPort ? uri.port : 443;
     final name = _displayName(uri.fragment, fallback: uri.host);
     final tls = <String, dynamic>{};
@@ -767,17 +781,20 @@ class ProfileImporter {
       if (tls.isNotEmpty) 'tls': tls,
     };
 
-    final transport = _v2rayTransport(query);
-    if (transport != null) {
-      outbound['transport'] = transport;
+    if (unsupportedTransport != null) {
+      outbound['unsupported_transport'] = unsupportedTransport;
+      outbound['transport_options'] = _unsupportedTransportOptions(query);
+    } else {
+      final transport = _v2rayTransport(query);
+      if (transport != null) {
+        outbound['transport'] = transport;
+      }
     }
 
     return VpnProfile(
       id: _stableId(link),
       name: name,
-      kind: security == 'reality'
-          ? VpnProfileKind.vlessReality
-          : VpnProfileKind.vlessTls,
+      kind: _vlessKind(security: security, transportType: transportType),
       originalInput: link,
       server: uri.host,
       port: port,
@@ -960,7 +977,7 @@ class ProfileImporter {
   }
 
   Map<String, dynamic>? _v2rayTransport(Map<String, String> query) {
-    final type = (query['type'] ?? query['transport'] ?? 'tcp').toLowerCase();
+    final type = _vlessTransportType(query);
     if (type == 'tcp' || type.isEmpty) {
       return null;
     }
@@ -994,7 +1011,76 @@ class ProfileImporter {
       };
     }
 
+    if (type == 'httpupgrade') {
+      final headers = <String, String>{};
+      final host = query['host'];
+      if (host != null && host.isNotEmpty) {
+        headers['Host'] = host;
+      }
+      return {
+        'type': 'httpupgrade',
+        if ((query['path'] ?? '').isNotEmpty) 'path': query['path'],
+        if (headers.isNotEmpty) 'headers': headers,
+      };
+    }
+
+    if (type == 'quic') {
+      return {'type': 'quic'};
+    }
+
     throw ProfileImportException('Transport "$type" пока не поддержан.');
+  }
+
+  VpnProfileKind _vlessKind({
+    required String security,
+    required String? transportType,
+  }) {
+    final type = (transportType ?? 'tcp').toLowerCase();
+    if (type == 'xhttp' || type == 'splithttp') {
+      return VpnProfileKind.vlessXhttp;
+    }
+    if (type == 'mkcp' || type == 'kcp') {
+      return VpnProfileKind.vlessMkcp;
+    }
+    return security == 'reality'
+        ? VpnProfileKind.vlessReality
+        : VpnProfileKind.vlessTls;
+  }
+
+  String _vlessTransportType(Map<String, String> query) {
+    return (query['type'] ?? query['transport'] ?? 'tcp').trim().toLowerCase();
+  }
+
+  String? _unsupportedVlessTransport(String type) {
+    if (type == 'xhttp' || type == 'splithttp') {
+      return 'xhttp';
+    }
+    if (type == 'mkcp' || type == 'kcp') {
+      return 'mkcp';
+    }
+    return null;
+  }
+
+  Map<String, dynamic> _unsupportedTransportOptions(Map<String, String> query) {
+    final entries = <String, dynamic>{};
+    for (final key in const [
+      'type',
+      'transport',
+      'host',
+      'path',
+      'mode',
+      'headerType',
+      'seed',
+      'xhttpMode',
+      'xmux',
+      'extra',
+    ]) {
+      final value = query[key];
+      if (value != null && value.isNotEmpty) {
+        entries[key] = value;
+      }
+    }
+    return entries;
   }
 
   String _vlessPacketEncoding(Map<String, String> query) {

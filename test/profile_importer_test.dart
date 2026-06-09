@@ -22,6 +22,47 @@ void main() {
     expect(profiles.first.outbound?['tls']['reality']['public_key'], 'abc123');
   });
 
+  test('imports VLESS XHTTP link as Xray-only profile', () async {
+    const link =
+        'vless://11111111-1111-4111-8111-111111111111@example.com:443?security=tls&type=xhttp&sni=example.com&path=%2Fxhttp#XHTTP';
+
+    final profile = (await ProfileImporter().importFromText(link)).first;
+
+    expect(profile.kind, VpnProfileKind.vlessXhttp);
+    expect(profile.outbound?['type'], 'vless');
+    expect(profile.outbound?['unsupported_transport'], 'xhttp');
+    expect(profile.outbound?['transport_options']['path'], '/xhttp');
+    expect(
+      () => SingBoxConfigBuilder().build(profile),
+      throwsA(
+        isA<UnsupportedError>().having(
+          (error) => error.message,
+          'message',
+          contains('Xray/libXray'),
+        ),
+      ),
+    );
+  });
+
+  test('imports VLESS mKCP link as Xray-only profile', () async {
+    const link =
+        'vless://11111111-1111-4111-8111-111111111111@example.com:8446?security=none&type=mkcp&headerType=wechat-video#MKCP';
+
+    final profile = (await ProfileImporter().importFromText(link)).first;
+
+    expect(profile.kind, VpnProfileKind.vlessMkcp);
+    expect(profile.outbound?['type'], 'vless');
+    expect(profile.outbound?['unsupported_transport'], 'mkcp');
+    expect(
+      profile.outbound?['transport_options']['headerType'],
+      'wechat-video',
+    );
+    expect(
+      () => SingBoxConfigBuilder().build(profile),
+      throwsA(isA<UnsupportedError>()),
+    );
+  });
+
   test('imports Hysteria2 link', () async {
     const link =
         'hy2://secret-for-test@example.com:443?sni=cdn.example.com&obfs=salamander&obfs-password=obfs-secret&upmbps=100&downmbps=200#Hy2';
@@ -475,8 +516,7 @@ void main() {
         return request.response.close();
       }),
     );
-    final source =
-        'http://${server.address.host}:${server.port}/s/token/links.txt';
+    final source = 'http://${server.address.host}:${server.port}/s/token/';
 
     final profiles = await ProfileImporter().importFromText(source);
 
@@ -563,11 +603,8 @@ void main() {
       expect(profiles.map((profile) => profile.name), contains('naive'));
       expect(profiles.map((profile) => profile.name), contains('ivan-hy2'));
       expect(profiles.map((profile) => profile.name), contains('ivan-reality'));
+      expect(profiles.map((profile) => profile.name), contains('ivan-mkcp'));
       expect(profiles.map((profile) => profile.name), contains('ivan-grpc'));
-      expect(
-        profiles.map((profile) => profile.name),
-        isNot(contains('ivan-mkcp')),
-      );
 
       final hysteria = profiles.firstWhere(
         (profile) => profile.kind == VpnProfileKind.hysteria2,
@@ -584,6 +621,12 @@ void main() {
         'type': 'grpc',
         'service_name': 'vless-grpc',
       });
+
+      final mkcp = profiles.firstWhere(
+        (profile) => profile.name == 'ivan-mkcp',
+      );
+      expect(mkcp.kind, VpnProfileKind.vlessMkcp);
+      expect(mkcp.outbound?['unsupported_transport'], 'mkcp');
     } finally {
       await server.close(force: true);
     }

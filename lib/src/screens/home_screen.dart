@@ -24,12 +24,15 @@ const _ink = Color(0xFF06111C);
 const _surface = Color(0xFF0D1A27);
 const _surfaceMetric = Color(0xFF10283B);
 const _mutedGold = Color(0xFF8EA9BD);
+const _cyanGlow = Color(0xFF22D3EE);
+const _deepGlow = Color(0xFF075985);
+const _nightGlow = Color(0xFF071827);
 const _appName = 'Yurich Connect';
 const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.46';
+const _appVersion = '1.0.48';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
@@ -71,7 +74,10 @@ enum _SupportTab { help, community }
 
 _ProfileTab _profileTabForKind(VpnProfileKind kind) {
   return switch (kind) {
-    VpnProfileKind.vlessReality || VpnProfileKind.vlessTls => _ProfileTab.vless,
+    VpnProfileKind.vlessReality ||
+    VpnProfileKind.vlessTls ||
+    VpnProfileKind.vlessXhttp ||
+    VpnProfileKind.vlessMkcp => _ProfileTab.vless,
     VpnProfileKind.naive => _ProfileTab.naive,
     VpnProfileKind.hysteria2 || VpnProfileKind.hysteria => _ProfileTab.hysteria,
     VpnProfileKind.singBoxConfig => _ProfileTab.singBox,
@@ -89,7 +95,8 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin {
   final _vpnEngine = createVpnEngine();
   final _store = ProfileStore();
   final _importer = ProfileImporter();
@@ -151,6 +158,8 @@ class _HomeScreenState extends State<HomeScreen> {
   int _lastSessionTrafficBytes = 0;
   final _logs = <String>[];
   final _pendingLogs = <String>[];
+  late final AnimationController _glowController;
+  late final Animation<double> _glowPulse;
 
   _Strings get s => _Strings.forLanguage(_language);
 
@@ -202,6 +211,14 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _glowController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2400),
+    )..repeat(reverse: true);
+    _glowPulse = CurvedAnimation(
+      parent: _glowController,
+      curve: Curves.easeInOut,
+    );
     _load();
     _initVpn();
     _statusWatchdogTimer = Timer.periodic(
@@ -231,6 +248,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _uptimeTimer?.cancel();
     _subscriptionReminderTimer?.cancel();
     _manualController.dispose();
+    _glowController.dispose();
     unawaited(_vpnEngine.dispose());
     super.dispose();
   }
@@ -1680,6 +1698,8 @@ class _HomeScreenState extends State<HomeScreen> {
     return switch (kind) {
       VpnProfileKind.vlessReality => 'VLESS Reality',
       VpnProfileKind.vlessTls => 'VLESS TLS',
+      VpnProfileKind.vlessXhttp => 'VLESS XHTTP',
+      VpnProfileKind.vlessMkcp => 'VLESS mKCP',
       VpnProfileKind.naive => 'NaiveProxy',
       VpnProfileKind.hysteria2 => 'Hysteria2',
       VpnProfileKind.hysteria => 'Hysteria',
@@ -2277,6 +2297,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        flexibleSpace: const _AppBarGradient(),
         title: const Row(
           children: [
             ClipRRect(
@@ -2293,70 +2316,100 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-          children: [
-            _StatusPanel(
-              strings: s,
-              status: _status,
-              degraded: _connectionDegraded,
-              message: _message,
-              uplink: _uplink,
-              downlink: _downlink,
-              uptime: _formatDuration(_connectedDuration),
-              onToggle: _toggleVpn,
-              toggleEnabled: !_busy && selected != null,
-            ),
-            const SizedBox(height: 16),
-            _ProfilePanel(
-              strings: s,
-              profiles: _profiles,
-              selectedProfile: selected,
-              selectedId: selected?.id,
-              selectedTab: _profileTab,
-              onTabChanged: (tab) => setState(() => _profileTab = tab),
-              onSelect: _selectProfile,
-              onAdd: _showImportSheet,
-              onCopy: selected == null ? null : _copySelected,
-              onQr: selected == null ? null : _showQr,
-              onDeleteProfile: (profile) => unawaited(_deleteProfile(profile)),
-              onRefreshSubscriptions: () => unawaited(_refreshSubscriptions()),
-              hasSubscriptionSources: _profiles.isNotEmpty,
-              subscriptionRefreshBusy: _subscriptionRefreshBusy,
-              subscriptionStatus: _subscriptionTileStatus,
-              subscriptionNeedsAttention: _subscriptionNeedsAttention,
-              kindLabel: _profileKindLabel,
-              displayName: _profileDisplayName,
-              countryFlag: _profileCountryFlag,
-              pingLabel: _profilePingLabel,
-              onPingAll: () => unawaited(_pingProfiles(_profiles)),
-              onPing: (profile) => unawaited(_pingProfile(profile)),
-            ),
-            const SizedBox(height: 16),
-            _AppCenterPanel(
-              strings: s,
-              selectedTab: _supportTab,
-              onTabChanged: (tab) => setState(() => _supportTab = tab),
-              language: _language,
-              onLanguageChanged: (language) =>
-                  unawaited(_setLanguage(language)),
-              onSupport: () => _openUrl(_telegramUrl),
-              onTelegram: () => _openUrl(_telegramUrl),
-              onVk: () => _openUrl(_vkUrl),
-              onDonate: () => _openUrl(_donateUrl),
-              onDeveloper: _emailDeveloper,
-              currentVersion: _appVersion,
-              availableVersion: _availableUpdate?.version,
-              updateMessage: _updateMessage,
-              updateBusy: _updateBusy,
-              updateProgress: _updateProgress,
-              onCheck: _checkAndInstallUpdate,
-              logs: _logs,
-              onExpansionChanged: (expanded) =>
-                  unawaited(_setLogsExpanded(expanded)),
-            ),
-          ],
+      body: DecoratedBox(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [_ink, _nightGlow, Color(0xFF03101A)],
+          ),
+        ),
+        child: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            children: [
+              _StatusPanel(
+                pulse: _glowPulse,
+                strings: s,
+                status: _status,
+                degraded: _connectionDegraded,
+                message: _message,
+                uplink: _uplink,
+                downlink: _downlink,
+                uptime: _formatDuration(_connectedDuration),
+                onToggle: _toggleVpn,
+                toggleEnabled: !_busy && selected != null,
+              ),
+              const SizedBox(height: 16),
+              _ProfilePanel(
+                pulse: _glowPulse,
+                strings: s,
+                profiles: _profiles,
+                selectedProfile: selected,
+                selectedId: selected?.id,
+                selectedTab: _profileTab,
+                onTabChanged: (tab) => setState(() => _profileTab = tab),
+                onSelect: _selectProfile,
+                onAdd: _showImportSheet,
+                onCopy: selected == null ? null : _copySelected,
+                onQr: selected == null ? null : _showQr,
+                onDeleteProfile: (profile) =>
+                    unawaited(_deleteProfile(profile)),
+                onRefreshSubscriptions: () =>
+                    unawaited(_refreshSubscriptions()),
+                hasSubscriptionSources: _profiles.isNotEmpty,
+                subscriptionRefreshBusy: _subscriptionRefreshBusy,
+                subscriptionStatus: _subscriptionTileStatus,
+                subscriptionNeedsAttention: _subscriptionNeedsAttention,
+                kindLabel: _profileKindLabel,
+                displayName: _profileDisplayName,
+                countryFlag: _profileCountryFlag,
+                pingLabel: _profilePingLabel,
+                onPingAll: () => unawaited(_pingProfiles(_profiles)),
+                onPing: (profile) => unawaited(_pingProfile(profile)),
+              ),
+              const SizedBox(height: 16),
+              _AppCenterPanel(
+                strings: s,
+                selectedTab: _supportTab,
+                onTabChanged: (tab) => setState(() => _supportTab = tab),
+                language: _language,
+                onLanguageChanged: (language) =>
+                    unawaited(_setLanguage(language)),
+                onSupport: () => _openUrl(_telegramUrl),
+                onTelegram: () => _openUrl(_telegramUrl),
+                onVk: () => _openUrl(_vkUrl),
+                onDonate: () => _openUrl(_donateUrl),
+                onDeveloper: _emailDeveloper,
+                currentVersion: _appVersion,
+                availableVersion: _availableUpdate?.version,
+                updateMessage: _updateMessage,
+                updateBusy: _updateBusy,
+                updateProgress: _updateProgress,
+                onCheck: _checkAndInstallUpdate,
+                logs: _logs,
+                onExpansionChanged: (expanded) =>
+                    unawaited(_setLogsExpanded(expanded)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AppBarGradient extends StatelessWidget {
+  const _AppBarGradient();
+
+  @override
+  Widget build(BuildContext context) {
+    return const DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF071A2A), Color(0xFF0B2B40), _ink],
         ),
       ),
     );
@@ -2365,6 +2418,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
 class _StatusPanel extends StatelessWidget {
   const _StatusPanel({
+    required this.pulse,
     required this.strings,
     required this.status,
     required this.degraded,
@@ -2376,6 +2430,7 @@ class _StatusPanel extends StatelessWidget {
     required this.toggleEnabled,
   });
 
+  final Animation<double> pulse;
   final _Strings strings;
   final String status;
   final bool degraded;
@@ -2407,76 +2462,98 @@ class _StatusPanel extends StatelessWidget {
         ? _gold.withValues(alpha: 0.18)
         : Colors.black26;
 
-    return SizedBox(
-      height: 212,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: _surface,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: accent),
-          boxShadow: [
-            BoxShadow(color: glow, blurRadius: 18, offset: const Offset(0, 8)),
-          ],
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return AnimatedBuilder(
+      animation: pulse,
+      builder: (context, child) {
+        final glowPower = connected || degraded ? pulse.value : 0.0;
+        return SizedBox(
+          height: 212,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: degraded
+                    ? const [Color(0xFF2A111B), Color(0xFF411623), _surface]
+                    : connected
+                    ? const [Color(0xFF0B2B40), Color(0xFF0E3A56), _surface]
+                    : const [_surface, Color(0xFF0A1B29)],
+              ),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: connected || degraded
+                    ? accent.withValues(alpha: 0.74 + glowPower * 0.26)
+                    : accent,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: glow.withValues(alpha: 0.14 + glowPower * 0.24),
+                  blurRadius: 18 + glowPower * 18,
+                  spreadRadius: glowPower * 1.4,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Padding(padding: const EdgeInsets.all(16), child: child),
+          ),
+        );
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Row(
-                children: [
-                  Icon(
-                    degraded
-                        ? Icons.warning_amber_rounded
-                        : connected
-                        ? Icons.verified_user
-                        : Icons.shield_outlined,
-                    color: degraded
-                        ? _dangerSoft
-                        : connected
-                        ? _goldSoft
-                        : _mutedGold,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      statusLabel,
-                      style: Theme.of(context).textTheme.headlineSmall,
-                    ),
-                  ),
-                ],
+              Icon(
+                degraded
+                    ? Icons.warning_amber_rounded
+                    : connected
+                    ? Icons.verified_user
+                    : Icons.shield_outlined,
+                color: degraded
+                    ? _dangerSoft
+                    : connected
+                    ? _goldSoft
+                    : _mutedGold,
               ),
-              const SizedBox(height: 8),
-              Text(
-                message,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: _mutedGold),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Expanded(
-                    child: _Metric(label: '↑', value: uplink, fixed: true),
-                  ),
-                  const SizedBox(width: 14),
-                  _UptimeButton(
-                    connected: connected,
-                    degraded: degraded,
-                    uptime: uptime,
-                    enabled: toggleEnabled,
-                    onPressed: onToggle,
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: _Metric(label: '↓', value: downlink, fixed: true),
-                  ),
-                ],
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  statusLabel,
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
               ),
             ],
           ),
-        ),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: _mutedGold),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: _Metric(label: '↑', value: uplink, fixed: true),
+              ),
+              const SizedBox(width: 14),
+              _UptimeButton(
+                pulse: pulse,
+                connected: connected,
+                degraded: degraded,
+                uptime: uptime,
+                enabled: toggleEnabled,
+                onPressed: onToggle,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: _Metric(label: '↓', value: downlink, fixed: true),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -2484,6 +2561,7 @@ class _StatusPanel extends StatelessWidget {
 
 class _UptimeButton extends StatelessWidget {
   const _UptimeButton({
+    required this.pulse,
     required this.connected,
     required this.degraded,
     required this.uptime,
@@ -2491,6 +2569,7 @@ class _UptimeButton extends StatelessWidget {
     required this.onPressed,
   });
 
+  final Animation<double> pulse;
   final bool connected;
   final bool degraded;
   final String uptime;
@@ -2499,85 +2578,96 @@ class _UptimeButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: connected ? 'Время работы VPN' : 'Подключить',
-      child: Material(
-        color: Colors.transparent,
-        shape: const CircleBorder(),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: RadialGradient(
-              colors: connected
-                  ? degraded
-                        ? const [
-                            Color(0xFFFFD7DF),
-                            Color(0xFFFF6B81),
-                            Color(0xFFFF244A),
-                          ]
-                        : const [
-                            Color(0xFFEAF7FF),
-                            Color(0xFF22D3EE),
-                            Color(0xFF0EA5FF),
-                          ]
-                  : const [Color(0xFF10283B), _surfaceMetric],
-            ),
-            border: Border.all(
-              color: degraded
-                  ? const Color(0xFFFFB3C0)
-                  : connected
-                  ? const Color(0xFFA7F3FF)
-                  : _gold.withValues(alpha: 0.35),
-              width: connected ? 2.2 : 1.5,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: degraded
-                    ? _danger.withValues(alpha: 0.56)
-                    : connected
-                    ? const Color(0xFF00C8FF).withValues(alpha: 0.58)
-                    : Colors.black38,
-                blurRadius: connected ? 34 : 22,
-                offset: const Offset(0, 12),
-              ),
-            ],
-          ),
-          child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: enabled ? onPressed : null,
-            child: SizedBox.square(
-              dimension: 94,
-              child: Padding(
-                padding: const EdgeInsets.all(10),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      degraded
-                          ? Icons.priority_high_rounded
+    return AnimatedBuilder(
+      animation: pulse,
+      builder: (context, child) {
+        final glowPower = connected || degraded ? pulse.value : 0.0;
+        return Transform.scale(
+          scale: connected || degraded ? 1 + glowPower * 0.025 : 1,
+          child: Tooltip(
+            message: connected ? 'Время работы VPN' : 'Подключить',
+            child: Material(
+              color: Colors.transparent,
+              shape: const CircleBorder(),
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: connected
+                        ? degraded
+                              ? const [
+                                  Color(0xFFFFD7DF),
+                                  Color(0xFFFF6B81),
+                                  Color(0xFFFF244A),
+                                ]
+                              : const [
+                                  Color(0xFFEAF7FF),
+                                  Color(0xFF67E8F9),
+                                  Color(0xFF0EA5FF),
+                                ]
+                        : const [Color(0xFF10283B), _surfaceMetric],
+                  ),
+                  border: Border.all(
+                    color: degraded
+                        ? const Color(0xFFFFB3C0)
+                        : connected
+                        ? const Color(0xFFA7F3FF)
+                        : _gold.withValues(alpha: 0.35),
+                    width: connected ? 2.2 : 1.5,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: degraded
+                          ? _danger.withValues(alpha: 0.42 + glowPower * 0.28)
                           : connected
-                          ? Icons.timer_outlined
-                          : Icons.power_settings_new,
-                      color: connected ? _ink : _goldSoft,
-                      size: 24,
-                    ),
-                    const SizedBox(height: 5),
-                    FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: Text(
-                        connected ? uptime : '00:00',
-                        maxLines: 1,
-                        style: TextStyle(
-                          color: connected ? _ink : _goldSoft,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 16,
-                          letterSpacing: 0,
-                        ),
-                      ),
+                          ? _cyanGlow.withValues(alpha: 0.42 + glowPower * 0.3)
+                          : Colors.black38,
+                      blurRadius: connected ? 28 + glowPower * 18 : 20,
+                      spreadRadius: glowPower * 2,
+                      offset: const Offset(0, 12),
                     ),
                   ],
                 ),
+                child: child,
               ),
+            ),
+          ),
+        );
+      },
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: enabled ? onPressed : null,
+        child: SizedBox.square(
+          dimension: 94,
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  degraded
+                      ? Icons.priority_high_rounded
+                      : connected
+                      ? Icons.timer_outlined
+                      : Icons.power_settings_new,
+                  color: connected ? _ink : _goldSoft,
+                  size: 24,
+                ),
+                const SizedBox(height: 5),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    connected ? uptime : '00:00',
+                    maxLines: 1,
+                    style: TextStyle(
+                      color: connected ? _ink : _goldSoft,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                      letterSpacing: 0,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -2606,7 +2696,11 @@ class _Metric extends StatelessWidget {
       height: fixed ? 52 : null,
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: _surfaceMetric,
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [_surfaceMetric, Color(0xFF0C3148)],
+        ),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: _gold.withValues(alpha: 0.18)),
       ),
@@ -2624,6 +2718,7 @@ class _Metric extends StatelessWidget {
 
 class _ProfilePanel extends StatelessWidget {
   const _ProfilePanel({
+    required this.pulse,
     required this.strings,
     required this.profiles,
     required this.selectedProfile,
@@ -2648,6 +2743,7 @@ class _ProfilePanel extends StatelessWidget {
     required this.onPing,
   });
 
+  final Animation<double> pulse;
   final _Strings strings;
   final List<VpnProfile> profiles;
   final VpnProfile? selectedProfile;
@@ -2724,6 +2820,7 @@ class _ProfilePanel extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         _ProfileTabBar(
+          pulse: pulse,
           strings: strings,
           profiles: profiles,
           selectedTab: selectedTab,
@@ -2739,6 +2836,7 @@ class _ProfilePanel extends StatelessWidget {
             (profile) => Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: _ProfileTile(
+                pulse: pulse,
                 profile: profile,
                 selected: profile.id == selectedId,
                 onTap: () => onSelect(profile),
@@ -2788,12 +2886,14 @@ class _ProfilePanel extends StatelessWidget {
 
 class _ProfileTabBar extends StatelessWidget {
   const _ProfileTabBar({
+    required this.pulse,
     required this.strings,
     required this.profiles,
     required this.selectedTab,
     required this.onChanged,
   });
 
+  final Animation<double> pulse;
   final _Strings strings;
   final List<VpnProfile> profiles;
   final _ProfileTab selectedTab;
@@ -2806,24 +2906,47 @@ class _ProfileTabBar extends StatelessWidget {
       child: Row(
         children: [
           for (final tab in _ProfileTab.values) ...[
-            ChoiceChip(
-              label: Text(strings.profileTabLabel(tab, _countFor(tab))),
-              selected: selectedTab == tab,
-              showCheckmark: false,
-              onSelected: (_) => onChanged(tab),
-              selectedColor: _gold.withValues(alpha: 0.9),
-              backgroundColor: _surface,
-              labelStyle: TextStyle(
-                color: selectedTab == tab ? _ink : _goldSoft,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0,
-              ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-                side: BorderSide(
-                  color: selectedTab == tab
-                      ? _goldSoft
-                      : _gold.withValues(alpha: 0.2),
+            AnimatedBuilder(
+              animation: pulse,
+              builder: (context, child) {
+                final selected = selectedTab == tab;
+                return DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    boxShadow: selected
+                        ? [
+                            BoxShadow(
+                              color: _cyanGlow.withValues(
+                                alpha: 0.16 + pulse.value * 0.18,
+                              ),
+                              blurRadius: 12 + pulse.value * 10,
+                              spreadRadius: pulse.value,
+                            ),
+                          ]
+                        : null,
+                  ),
+                  child: child,
+                );
+              },
+              child: ChoiceChip(
+                label: Text(strings.profileTabLabel(tab, _countFor(tab))),
+                selected: selectedTab == tab,
+                showCheckmark: false,
+                onSelected: (_) => onChanged(tab),
+                selectedColor: _gold.withValues(alpha: 0.9),
+                backgroundColor: _surface,
+                labelStyle: TextStyle(
+                  color: selectedTab == tab ? _ink : _goldSoft,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  side: BorderSide(
+                    color: selectedTab == tab
+                        ? _goldSoft
+                        : _gold.withValues(alpha: 0.2),
+                  ),
                 ),
               ),
             ),
@@ -2844,6 +2967,7 @@ class _ProfileTabBar extends StatelessWidget {
 
 class _ProfileTile extends StatelessWidget {
   const _ProfileTile({
+    required this.pulse,
     required this.profile,
     required this.selected,
     required this.onTap,
@@ -2859,6 +2983,7 @@ class _ProfileTile extends StatelessWidget {
     required this.deleteTooltip,
   });
 
+  final Animation<double> pulse;
   final VpnProfile profile;
   final bool selected;
   final VoidCallback onTap;
@@ -2875,109 +3000,144 @@ class _ProfileTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Ink(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: selected ? _gold.withValues(alpha: 0.18) : _surface,
+    final content = Row(
+      children: [
+        SizedBox(
+          width: 32,
+          child: Center(
+            child: countryFlag == null
+                ? Icon(switch (profile.kind) {
+                    VpnProfileKind.naive => Icons.public,
+                    VpnProfileKind.hysteria2 ||
+                    VpnProfileKind.hysteria => Icons.speed_outlined,
+                    _ => Icons.bolt,
+                  }, color: selected ? _goldSoft : _mutedGold)
+                : Text(countryFlag!, style: const TextStyle(fontSize: 22)),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                displayName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${kindLabel(profile.kind)} · ${profile.endpoint}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: _mutedGold),
+              ),
+              if (subscriptionStatus != null) ...[
+                const SizedBox(height: 4),
+                Text(
+                  '$subscriptionLabel · $subscriptionStatus',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: subscriptionNeedsAttention
+                        ? _dangerSoft
+                        : _mutedGold,
+                    fontSize: 12,
+                    fontWeight: subscriptionNeedsAttention
+                        ? FontWeight.w700
+                        : FontWeight.w400,
+                    letterSpacing: 0,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        InkResponse(
+          onTap: onPing,
+          radius: 28,
+          child: Container(
+            constraints: const BoxConstraints(minWidth: 64),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: BoxDecoration(
+              color: _surfaceMetric,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: _gold.withValues(alpha: 0.18)),
+            ),
+            alignment: Alignment.center,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                pingLabel,
+                maxLines: 1,
+                style: const TextStyle(
+                  color: _goldSoft,
+                  fontSize: 12,
+                  letterSpacing: 0,
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 4),
+        IconButton(
+          tooltip: deleteTooltip,
+          onPressed: onDelete,
+          icon: const Icon(Icons.delete_outline),
+          color: selected ? _goldSoft : _mutedGold,
+          iconSize: 20,
+          visualDensity: VisualDensity.compact,
+        ),
+      ],
+    );
+
+    return AnimatedBuilder(
+      animation: pulse,
+      builder: (context, child) {
+        final glowPower = selected ? pulse.value : 0.0;
+        return InkWell(
+          onTap: onTap,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: selected ? _gold : Colors.white12),
-        ),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 32,
-              child: Center(
-                child: countryFlag == null
-                    ? Icon(switch (profile.kind) {
-                        VpnProfileKind.naive => Icons.public,
-                        VpnProfileKind.hysteria2 ||
-                        VpnProfileKind.hysteria => Icons.speed_outlined,
-                        _ => Icons.bolt,
-                      }, color: selected ? _goldSoft : _mutedGold)
-                    : Text(countryFlag!, style: const TextStyle(fontSize: 22)),
+          child: Ink(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              gradient: selected
+                  ? const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [Color(0xFF0D3B56), Color(0xFF0B2234)],
+                    )
+                  : const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [_surface, Color(0xFF0A1723)],
+                    ),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: selected
+                    ? _cyanGlow.withValues(alpha: 0.74 + glowPower * 0.26)
+                    : Colors.white12,
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    displayName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${kindLabel(profile.kind)} · ${profile.endpoint}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(color: _mutedGold),
-                  ),
-                  if (subscriptionStatus != null) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      '$subscriptionLabel · $subscriptionStatus',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: subscriptionNeedsAttention
-                            ? _dangerSoft
-                            : _mutedGold,
-                        fontSize: 12,
-                        fontWeight: subscriptionNeedsAttention
-                            ? FontWeight.w700
-                            : FontWeight.w400,
-                        letterSpacing: 0,
+              boxShadow: selected
+                  ? [
+                      BoxShadow(
+                        color: _cyanGlow.withValues(
+                          alpha: 0.12 + glowPower * 0.16,
+                        ),
+                        blurRadius: 14 + glowPower * 12,
+                        spreadRadius: glowPower,
+                        offset: const Offset(0, 7),
                       ),
-                    ),
-                  ],
-                ],
-              ),
+                    ]
+                  : null,
             ),
-            const SizedBox(width: 8),
-            InkResponse(
-              onTap: onPing,
-              radius: 28,
-              child: Container(
-                constraints: const BoxConstraints(minWidth: 64),
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                decoration: BoxDecoration(
-                  color: _surfaceMetric,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: _gold.withValues(alpha: 0.18)),
-                ),
-                alignment: Alignment.center,
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    pingLabel,
-                    maxLines: 1,
-                    style: const TextStyle(
-                      color: _goldSoft,
-                      fontSize: 12,
-                      letterSpacing: 0,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 4),
-            IconButton(
-              tooltip: deleteTooltip,
-              onPressed: onDelete,
-              icon: const Icon(Icons.delete_outline),
-              color: selected ? _goldSoft : _mutedGold,
-              iconSize: 20,
-              visualDensity: VisualDensity.compact,
-            ),
-          ],
-        ),
-      ),
+            child: child,
+          ),
+        );
+      },
+      child: content,
     );
   }
 }
@@ -3034,9 +3194,23 @@ class _ProfileInsightPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: _surfaceMetric.withValues(alpha: 0.72),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            _surfaceMetric.withValues(alpha: 0.9),
+            const Color(0xFF0A2132).withValues(alpha: 0.88),
+          ],
+        ),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: _gold.withValues(alpha: 0.18)),
+        boxShadow: [
+          BoxShadow(
+            color: _deepGlow.withValues(alpha: 0.12),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -3265,7 +3439,11 @@ class _AppCenterPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: _surface,
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [_surface, Color(0xFF081D2C), Color(0xFF071522)],
+        ),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: _gold.withValues(alpha: 0.22)),
         boxShadow: [
@@ -4181,7 +4359,7 @@ class _Strings {
     refreshSubscriptions: 'Обновить подписки',
     refreshingSubscriptions: 'Обновляю подписки...',
     noSubscriptionsToRefresh:
-        'Не нашёл исходную ссылку подписки. Вставь https://.../links.txt один раз.',
+        'Не нашёл исходную ссылку подписки. Вставь https://.../s/... или https://.../links.txt один раз.',
     subscriptionReminderTitle: 'Пора продлить подписку',
     mobileReady: 'Wi‑Fi / LTE',
     mobileNetworkAdvice:
@@ -4215,7 +4393,7 @@ class _Strings {
       _FaqItem(
         question: 'Какие протоколы поддерживаются?',
         answer:
-            'Поддерживаются VLESS Reality, VLESS TLS, NaiveProxy, Hysteria2, Hysteria, Remnawave подписки и sing-box JSON.',
+            'Поддерживаются VLESS Reality/TLS, NaiveProxy, Hysteria2, Hysteria, Remnawave подписки и sing-box JSON. VLESS XHTTP/mKCP импортируются и будут готовы к подключению после добавления Xray-движка.',
       ),
       _FaqItem(
         question: 'Что делать, если после смены профиля пропал интернет?',
@@ -4302,7 +4480,7 @@ class _Strings {
     refreshSubscriptions: 'Refresh subscriptions',
     refreshingSubscriptions: 'Refreshing subscriptions...',
     noSubscriptionsToRefresh:
-        'No saved subscription source. Paste the https://.../links.txt URL once.',
+        'No saved subscription source. Paste the https://.../s/... or https://.../links.txt URL once.',
     subscriptionReminderTitle: 'Subscription renewal',
     mobileReady: 'Wi‑Fi / LTE',
     mobileNetworkAdvice:
@@ -4336,7 +4514,7 @@ class _Strings {
       _FaqItem(
         question: 'Which protocols are supported?',
         answer:
-            'VLESS Reality, VLESS TLS, NaiveProxy, Hysteria2, Hysteria, Remnawave subscriptions, and sing-box JSON are supported.',
+            'VLESS Reality/TLS, NaiveProxy, Hysteria2, Hysteria, Remnawave subscriptions, and sing-box JSON are supported. VLESS XHTTP/mKCP are imported and will be connectable after the Xray engine is added.',
       ),
       _FaqItem(
         question: 'What if internet stops after switching profiles?',
