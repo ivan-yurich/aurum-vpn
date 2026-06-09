@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.54 - 2026-06-09
+
+- Added an experimental Android Xray sidecar bridge for imported VLESS XHTTP
+  and VLESS mKCP profiles on arm64 devices.
+- Kept sing-box as the main Android TUN/VpnService engine and routes XHTTP/mKCP
+  through a local Xray SOCKS bridge, preserving the stable NaiveProxy,
+  Hysteria2, and VLESS Reality behavior.
+- Added tests for Xray bridge JSON generation and sing-box bridge outbound
+  generation.
+
 ## 1.0.53 - 2026-06-09
 
 - Added a direct APK fallback action when the in-app updater cannot complete

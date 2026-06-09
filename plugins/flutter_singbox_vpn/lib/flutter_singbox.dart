@@ -30,6 +30,21 @@ class FlutterSingbox {
     return FlutterSingboxPlatform.instance.stopVPN();
   }
 
+  /// Start packaged Xray core as a local proxy process.
+  Future<bool> startXray(String config) {
+    return FlutterSingboxPlatform.instance.startXray(config);
+  }
+
+  /// Stop packaged Xray core if it is running.
+  Future<bool> stopXray() {
+    return FlutterSingboxPlatform.instance.stopXray();
+  }
+
+  /// Returns true when the packaged Xray core is running.
+  Future<bool> isXrayRunning() {
+    return FlutterSingboxPlatform.instance.isXrayRunning();
+  }
+
   /// Get current VPN status
   ///
   /// Returns one of the following strings:

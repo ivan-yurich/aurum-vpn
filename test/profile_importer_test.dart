@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:aurum_vpn/src/models/vpn_profile.dart';
 import 'package:aurum_vpn/src/services/profile_importer.dart';
 import 'package:aurum_vpn/src/services/sing_box_config_builder.dart';
+import 'package:aurum_vpn/src/services/xray_config_builder.dart';
 
 void main() {
   test('imports VLESS Reality link', () async {
@@ -42,6 +43,27 @@ void main() {
         ),
       ),
     );
+
+    final bridgeConfig =
+        jsonDecode(XrayConfigBuilder().buildBridge(profile).xrayConfig)
+            as Map<String, dynamic>;
+    final xrayOutbound =
+        (bridgeConfig['outbounds'] as List).first as Map<String, dynamic>;
+    final streamSettings =
+        xrayOutbound['streamSettings'] as Map<String, dynamic>;
+    expect(streamSettings['network'], 'xhttp');
+    expect(streamSettings['xhttpSettings'], {'path': '/xhttp'});
+
+    final singBoxBridge =
+        jsonDecode(
+              SingBoxConfigBuilder().build(profile, xrayBridgeSocksPort: 21880),
+            )
+            as Map<String, dynamic>;
+    final proxy =
+        (singBoxBridge['outbounds'] as List).first as Map<String, dynamic>;
+    expect(proxy['type'], 'socks');
+    expect(proxy['server'], '127.0.0.1');
+    expect(proxy['server_port'], 21880);
   });
 
   test('imports VLESS mKCP link as Xray-only profile', () async {
@@ -61,6 +83,16 @@ void main() {
       () => SingBoxConfigBuilder().build(profile),
       throwsA(isA<UnsupportedError>()),
     );
+
+    final bridgeConfig =
+        jsonDecode(XrayConfigBuilder().buildBridge(profile).xrayConfig)
+            as Map<String, dynamic>;
+    final xrayOutbound =
+        (bridgeConfig['outbounds'] as List).first as Map<String, dynamic>;
+    final streamSettings =
+        xrayOutbound['streamSettings'] as Map<String, dynamic>;
+    expect(streamSettings['network'], 'kcp');
+    expect(streamSettings['kcpSettings'], isEmpty);
   });
 
   test('imports Hysteria2 link', () async {
