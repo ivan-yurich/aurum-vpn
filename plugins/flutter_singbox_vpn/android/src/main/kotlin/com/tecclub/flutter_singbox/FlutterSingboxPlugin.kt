@@ -29,6 +29,7 @@ import androidx.lifecycle.Observer
 import com.tecclub.flutter_singbox.bg.BoxService
 import com.tecclub.flutter_singbox.bg.ServiceConnection
 import com.tecclub.flutter_singbox.bg.ServiceNotification
+import com.tecclub.flutter_singbox.bg.VpnNotificationHelper
 import com.tecclub.flutter_singbox.database.Settings
 import com.tecclub.flutter_singbox.config.SimpleConfigManager
 import com.tecclub.flutter_singbox.constant.Action
@@ -36,12 +37,15 @@ import com.tecclub.flutter_singbox.constant.Alert
 import com.tecclub.flutter_singbox.constant.Status
 import com.tecclub.flutter_singbox.constant.ServiceMode
 import com.tecclub.flutter_singbox.constant.TrafficStats
+import com.tecclub.flutter_singbox.model.ConnectionStatus
+import com.tecclub.flutter_singbox.model.ConnectionUiState
 import go.Seq
 import io.nekohasekai.libbox.Libbox
 import io.nekohasekai.libbox.SetupOptions
 import java.io.File
 import com.tecclub.flutter_singbox.utils.StatusClient
 import com.tecclub.flutter_singbox.utils.LogClient
+import com.tecclub.flutter_singbox.utils.TrafficFormatter
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -241,6 +245,9 @@ class FlutterSingboxPlugin :
     private var lastUidRxBytes = -1L
     private var lastUidTrafficSampleAt = 0L
     private var lastNotificationUpdateAt = 0L
+    private var sessionStartedAt = 0L
+    private var connectionUiState = ConnectionUiState.disconnected()
+    private val vpnNotificationHelper by lazy { VpnNotificationHelper(context) }
     
     // VPN permission request code
     private val VPN_REQUEST_CODE = 24
@@ -308,6 +315,14 @@ class FlutterSingboxPlugin :
                 // Connect or disconnect clients based on status
                 when (status) {
                     Status.Started -> {
+                        if (sessionStartedAt == 0L) {
+                            sessionStartedAt = System.currentTimeMillis()
+                        }
+                        connectionUiState = connectionUiState.copy(
+                            status = ConnectionStatus.Connected,
+                            sessionDuration = currentSessionDuration()
+                        )
+                        vpnNotificationHelper.updateNotification(connectionUiState)
                         if (!statusClient.isConnected()) {
                             statusClient.connect()
                         }
@@ -316,10 +331,19 @@ class FlutterSingboxPlugin :
                         }
                     }
                     Status.Stopped -> {
+                        sessionStartedAt = 0L
+                        connectionUiState = ConnectionUiState.disconnected()
                         // Clients will be disconnected by stopVPN or onServiceStatusChanged
                     }
                     else -> {
-                        // Starting/Stopping - no action
+                        connectionUiState = connectionUiState.copy(
+                            status = if (status == Status.Starting) {
+                                ConnectionStatus.Connecting
+                            } else {
+                                ConnectionStatus.Disconnected
+                            }
+                        )
+                        vpnNotificationHelper.updateNotification(connectionUiState)
                     }
                 }
                 
@@ -685,6 +709,10 @@ class FlutterSingboxPlugin :
                 val description = call.argument<String>("description") ?: "Connected"
                 setNotificationDescription(description, result)
             }
+            "updateConnectionNotification" -> {
+                val state = call.argument<Map<String, Any?>>("state")
+                updateConnectionNotification(state, result)
+            }
             "requestNotificationPermission" -> {
                 requestNotificationPermission(result)
             }
@@ -739,6 +767,21 @@ class FlutterSingboxPlugin :
             result.success(description)
         } catch (e: Exception) {
             result.error("NOTIFICATION_ERROR", e.message, null)
+        }
+    }
+
+    private fun updateConnectionNotification(state: Map<*, *>?, result: Result) {
+        try {
+            connectionUiState = ConnectionUiState.fromMap(state)
+            if (
+                connectionUiState.status != ConnectionStatus.Disconnected ||
+                _vpnStatus.value != Status.Stopped
+            ) {
+                vpnNotificationHelper.updateNotification(connectionUiState)
+            }
+            result.success(true)
+        } catch (e: Exception) {
+            result.error("NOTIFICATION_UPDATE_ERROR", e.message, null)
         }
     }
 
@@ -914,6 +957,14 @@ class FlutterSingboxPlugin :
         try {
             // Update status to Starting
             _vpnStatus.value = Status.Starting
+            connectionUiState = connectionUiState.copy(
+                status = ConnectionStatus.Connecting,
+                uploadSpeed = "0 B/s",
+                downloadSpeed = "0 B/s",
+                totalTraffic = "0 B",
+                sessionDuration = null
+            )
+            vpnNotificationHelper.updateNotification(connectionUiState)
             android.util.Log.e("FlutterSingboxPlugin", "Set VPN status to Starting")
             sendStatusUpdate(Status.Starting)
             SimpleConfigManager.setStartedByUser(true)
@@ -1234,6 +1285,15 @@ class FlutterSingboxPlugin :
         when (status) {
             Status.Started -> {
                 android.util.Log.e("FlutterSingboxPlugin", "Service started, connecting status client")
+                sessionStartedAt = System.currentTimeMillis()
+                connectionUiState = connectionUiState.copy(
+                    status = ConnectionStatus.Connected,
+                    uploadSpeed = "0 B/s",
+                    downloadSpeed = "0 B/s",
+                    totalTraffic = "0 B",
+                    sessionDuration = "00:00:00"
+                )
+                vpnNotificationHelper.updateNotification(connectionUiState)
                 
                 // Connect status client if not already connected
                 if (!statusClient.isConnected()) {
@@ -1252,8 +1312,10 @@ class FlutterSingboxPlugin :
             }
             Status.Stopped -> {
                 android.util.Log.e("FlutterSingboxPlugin", "Service stopped, disconnecting status client")
+                sessionStartedAt = 0L
                 statusClient.disconnect()
                 logClient.disconnect()
+                connectionUiState = ConnectionUiState.disconnected()
                 
                 // Reset traffic stats when stopped
                 _trafficStats.value = mapOf<String, Any>(
@@ -1429,40 +1491,21 @@ class FlutterSingboxPlugin :
         }
         lastNotificationUpdateAt = now
 
-        val text = "↑ ${stats["formattedUplinkSpeed"]}  ↓ ${stats["formattedDownlinkSpeed"]}  Σ ${stats["formattedSessionTotal"]}"
-        val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        }
-        val pendingIntent = launchIntent?.let {
-            android.app.PendingIntent.getActivity(
-                context,
-                0,
-                it,
-                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
-            )
-        }
+        connectionUiState = connectionUiState.copy(
+            status = ConnectionStatus.Connected,
+            uploadSpeed = stats["formattedUplinkSpeed"]?.toString() ?: "0 B/s",
+            downloadSpeed = stats["formattedDownlinkSpeed"]?.toString() ?: "0 B/s",
+            totalTraffic = stats["formattedSessionTotal"]?.toString() ?: "0 B",
+            sessionDuration = currentSessionDuration()
+        )
+        vpnNotificationHelper.updateNotification(connectionUiState)
+    }
 
-        val notification = NotificationCompat.Builder(context, ServiceNotification.CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification_shield)
-            .setContentTitle(SimpleConfigManager.getNotificationTitle())
-            .setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-            .setPriority(NotificationCompat.PRIORITY_MIN)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setOnlyAlertOnce(true)
-            .setOngoing(true)
-            .setSilent(true)
-            .setShowWhen(false)
-            .setLocalOnly(true)
-            .apply {
-                if (pendingIntent != null) {
-                    setContentIntent(pendingIntent)
-                }
-            }
-            .build()
-
-        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(ServiceNotification.NOTIFICATION_ID, notification)
+    private fun currentSessionDuration(): String? {
+        val startedAt = sessionStartedAt
+        if (startedAt <= 0L) return connectionUiState.sessionDuration
+        val seconds = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L) / 1000L
+        return TrafficFormatter.formatDuration(seconds)
     }
     
     // Per-App Tunneling methods

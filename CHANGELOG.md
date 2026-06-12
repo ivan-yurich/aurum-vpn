@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.59 - 2026-06-12
+
+- Added a shared connection UI state model for the app and native Android
+  service, so status, active protocol, country, ping, traffic, and session time
+  are represented consistently.
+- Enriched the main connection banner with compact protocol, country, and ping
+  chips while keeping the fixed-size cyber/glass layout stable during live
+  traffic updates.
+- Reworked the Android foreground VPN notification to show the active profile,
+  protocol, country, ping, upload/download speed, total traffic, and session
+  duration.
+- Added notification actions for opening the app, disconnecting, reconnecting,
+  or starting the VPN from the foreground notification.
+- Added formatter and protocol-display tests for Yurich Connect protocol names:
+  VLESS Reality, NaiveProxy, and Hysteria/Hysteria2.
+
 ## 1.0.58 - 2026-06-12
 
 - Added a shared Yurich Connect dark cyber/glass design system and moved the

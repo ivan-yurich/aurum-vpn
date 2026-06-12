@@ -8,14 +8,18 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../models/connection_status.dart';
+import '../models/connection_ui_state.dart';
 import '../models/vpn_profile.dart';
 import '../services/app_update_service.dart';
 import '../services/profile_geo_service.dart';
 import '../services/profile_importer.dart';
 import '../services/profile_store.dart';
+import '../services/protocol_display_mapper.dart';
 import '../services/sing_box_config_builder.dart';
 import '../services/vpn_engine.dart';
 import '../theme/yurich_theme.dart';
+import '../utils/traffic_formatter.dart';
 import 'qr_scan_screen.dart';
 
 const _gold = YurichColors.accentBlue;
@@ -33,7 +37,7 @@ const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersionFallback = '1.0.58';
+const _appVersionFallback = '1.0.59';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
@@ -160,6 +164,7 @@ class _HomeScreenState extends State<HomeScreen>
   bool _statusWatchdogInFlight = false;
   bool _tunnelHealthCheckInFlight = false;
   bool _autoReconnectInFlight = false;
+  bool _notificationSyncInFlight = false;
   bool _autoRecoveryArmed = false;
   bool _pingAllInFlight = false;
   bool _countryResolveInFlight = false;
@@ -224,6 +229,61 @@ class _HomeScreenState extends State<HomeScreen>
       }
     }
     return false;
+  }
+
+  ConnectionUiState get _connectionUiState {
+    final profile = _selectedProfile;
+    final connectionStatus = switch (_status) {
+      AurumVpnStatus.started => ConnectionStatus.connected,
+      AurumVpnStatus.starting ||
+      AurumVpnStatus.stopping => ConnectionStatus.connecting,
+      _ => ConnectionStatus.disconnected,
+    };
+
+    if (connectionStatus == ConnectionStatus.disconnected) {
+      return ConnectionUiState.disconnected();
+    }
+
+    return ConnectionUiState(
+      status: connectionStatus,
+      profileName: profile == null ? null : _profileDisplayName(profile),
+      protocolDisplayName: profile == null
+          ? null
+          : ProtocolDisplayMapper.mapProfile(profile),
+      countryName: _profileCountryName(profile),
+      countryCode: profile?.countryCode,
+      pingMs: profile == null ? null : _profilePingMs[profile.id],
+      uploadSpeed: _uplink,
+      downloadSpeed: _downlink,
+      totalTraffic: _sessionTotal,
+      sessionDuration: _connectedDuration == null
+          ? null
+          : TrafficFormatter.formatDuration(_connectedDuration!),
+    );
+  }
+
+  String? _profileCountryName(VpnProfile? profile) {
+    if (profile == null) {
+      return null;
+    }
+    final countryName = profile.countryName?.trim();
+    if (countryName != null && countryName.isNotEmpty) {
+      return countryName;
+    }
+    final flag = _profileCountryFlag(profile);
+    return switch (flag) {
+      '🇷🇺' => 'Россия',
+      '🇫🇮' => 'Финляндия',
+      '🇩🇪' => 'Германия',
+      '🇺🇸' => 'США',
+      '🇯🇵' => 'Япония',
+      '🇳🇱' => 'Нидерланды',
+      '🇫🇷' => 'Франция',
+      '🇨🇦' => 'Канада',
+      '🇹🇷' => 'Турция',
+      '🇬🇧' => 'Великобритания',
+      _ => null,
+    };
   }
 
   @override
@@ -367,6 +427,7 @@ class _HomeScreenState extends State<HomeScreen>
         if (recoverUnexpectedStop) {
           _markUnexpectedStop('status-event');
         }
+        unawaited(_syncConnectionNotification());
       }
     });
 
@@ -404,6 +465,7 @@ class _HomeScreenState extends State<HomeScreen>
             _tunnelHealthFailures = 0;
           }
         });
+        unawaited(_syncConnectionNotification());
       });
     });
 
@@ -452,9 +514,26 @@ class _HomeScreenState extends State<HomeScreen>
                   .reversed,
             );
         });
+        unawaited(_syncConnectionNotification());
       }
     } on Object {
       // In widget tests and desktop preview the native Android plugin is absent.
+    }
+  }
+
+  Future<void> _syncConnectionNotification() async {
+    if (_notificationSyncInFlight) {
+      return;
+    }
+    _notificationSyncInFlight = true;
+    try {
+      await _bestEffortNative(
+        'updateConnectionNotification',
+        _vpnEngine.updateConnectionNotification(_connectionUiState.toJson()),
+        timeout: const Duration(seconds: 2),
+      );
+    } finally {
+      _notificationSyncInFlight = false;
     }
   }
 
@@ -1066,6 +1145,7 @@ class _HomeScreenState extends State<HomeScreen>
         );
         _message = s.connectionProfile(profile.name);
       });
+      unawaited(_syncConnectionNotification());
     }
     unawaited(_refreshConnectedCountry(profile.id));
   }
@@ -1127,6 +1207,7 @@ class _HomeScreenState extends State<HomeScreen>
             _message = s.vpnStopped;
           }
         });
+        unawaited(_syncConnectionNotification());
       }
     } finally {
       _stoppingByUser = false;
@@ -1525,6 +1606,9 @@ class _HomeScreenState extends State<HomeScreen>
               : 'DNS ${stopwatch.elapsedMilliseconds} ms';
           _profilePingError.remove(profile.id);
         });
+        if (profile.id == _selectedProfileId) {
+          unawaited(_syncConnectionNotification());
+        }
         return;
       }
 
@@ -1542,6 +1626,9 @@ class _HomeScreenState extends State<HomeScreen>
         _profilePingText.remove(profile.id);
         _profilePingError.remove(profile.id);
       });
+      if (profile.id == _selectedProfileId) {
+        unawaited(_syncConnectionNotification());
+      }
     } on Object catch (error) {
       if (!mounted) {
         return;
@@ -1656,6 +1743,9 @@ class _HomeScreenState extends State<HomeScreen>
       return;
     }
     setState(() => _profiles = next);
+    if (profileId == _selectedProfileId) {
+      unawaited(_syncConnectionNotification());
+    }
   }
 
   String? _profileCountryFlag(VpnProfile profile) {
@@ -1737,21 +1827,8 @@ class _HomeScreenState extends State<HomeScreen>
     if (duration == null) {
       return '00:00';
     }
-    final totalSeconds = duration.inSeconds;
-    final hours = totalSeconds ~/ 3600;
-    final minutes = (totalSeconds % 3600) ~/ 60;
-    final seconds = totalSeconds % 60;
-    if (hours > 0) {
-      return [
-        hours.toString().padLeft(2, '0'),
-        minutes.toString().padLeft(2, '0'),
-        seconds.toString().padLeft(2, '0'),
-      ].join(':');
-    }
-    return [
-      minutes.toString().padLeft(2, '0'),
-      seconds.toString().padLeft(2, '0'),
-    ].join(':');
+    final formatted = TrafficFormatter.formatDuration(duration);
+    return formatted.startsWith('00:') ? formatted.substring(3) : formatted;
   }
 
   Future<void> _setLanguage(_AppLanguage language) async {
@@ -1777,16 +1854,29 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   String _profileKindLabel(VpnProfileKind kind) {
-    return switch (kind) {
-      VpnProfileKind.vlessReality => 'VLESS Reality',
-      VpnProfileKind.vlessTls => 'VLESS TLS',
-      VpnProfileKind.vlessXhttp => 'VLESS XHTTP',
-      VpnProfileKind.vlessMkcp => 'VLESS mKCP',
-      VpnProfileKind.naive => 'NaiveProxy',
-      VpnProfileKind.hysteria2 => 'Hysteria2',
-      VpnProfileKind.hysteria => 'Hysteria',
-      VpnProfileKind.singBoxConfig => 'Sing-box',
-    };
+    return ProtocolDisplayMapper.mapProtocolToDisplayName(
+      switch (kind) {
+        VpnProfileKind.vlessReality ||
+        VpnProfileKind.vlessTls ||
+        VpnProfileKind.vlessXhttp ||
+        VpnProfileKind.vlessMkcp => 'vless',
+        VpnProfileKind.naive => 'naive',
+        VpnProfileKind.hysteria2 => 'hysteria2',
+        VpnProfileKind.hysteria => 'hysteria',
+        VpnProfileKind.singBoxConfig => 'Sing-box',
+      },
+      transport: switch (kind) {
+        VpnProfileKind.vlessXhttp => 'xhttp',
+        VpnProfileKind.vlessMkcp => 'mkcp',
+        _ => 'tcp',
+      },
+      security: switch (kind) {
+        VpnProfileKind.vlessReality ||
+        VpnProfileKind.vlessXhttp ||
+        VpnProfileKind.vlessMkcp => 'reality',
+        _ => null,
+      },
+    );
   }
 
   Future<void> _deleteProfile(VpnProfile profile) async {
@@ -2420,6 +2510,7 @@ class _HomeScreenState extends State<HomeScreen>
                   pulse: _glowPulse,
                   strings: s,
                   status: _status,
+                  connectionState: _connectionUiState,
                   degraded: _connectionDegraded,
                   message: _message,
                   uplink: _uplink,
@@ -2512,6 +2603,7 @@ class _StatusPanel extends StatelessWidget {
     required this.pulse,
     required this.strings,
     required this.status,
+    required this.connectionState,
     required this.degraded,
     required this.message,
     required this.uplink,
@@ -2525,6 +2617,7 @@ class _StatusPanel extends StatelessWidget {
   final Animation<double> pulse;
   final _Strings strings;
   final String status;
+  final ConnectionUiState connectionState;
   final bool degraded;
   final String message;
   final String uplink;
@@ -2554,13 +2647,23 @@ class _StatusPanel extends StatelessWidget {
         : connected
         ? _cyanGlow.withValues(alpha: 0.18)
         : YurichColors.shadow;
+    final protocol = connectionState.protocolDisplayName ?? '—';
+    final country = [
+      connectionState.countryName,
+      connectionState.countryCode == null
+          ? null
+          : ProfileGeo.countryCodeToFlag(connectionState.countryCode),
+    ].whereType<String>().where((value) => value.isNotEmpty).join(' ');
+    final ping = connectionState.pingMs == null
+        ? '—'
+        : '${connectionState.pingMs} ms';
 
     return AnimatedBuilder(
       animation: pulse,
       builder: (context, child) {
         final glowPower = connected || degraded ? pulse.value : 0.0;
         return SizedBox(
-          height: 166,
+          height: 196,
           child: DecoratedBox(
             decoration: BoxDecoration(
               gradient: degraded
@@ -2628,6 +2731,26 @@ class _StatusPanel extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: _mutedGold),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _StatusInfoPill(
+                  icon: Icons.route_outlined,
+                  text: protocol,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _StatusInfoPill(
+                  icon: Icons.flag_outlined,
+                  text: country.isEmpty ? '—' : country,
+                ),
+              ),
+              const SizedBox(width: 8),
+              _StatusInfoPill(icon: Icons.speed_outlined, text: ping),
+            ],
           ),
           const SizedBox(height: 8),
           Row(
@@ -2778,6 +2901,46 @@ class _UptimeButton extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _StatusInfoPill extends StatelessWidget {
+  const _StatusInfoPill({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 30,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: YurichColors.surfaceMetric.withValues(alpha: 0.72),
+        borderRadius: BorderRadius.circular(YurichRadii.control),
+        border: Border.all(color: YurichColors.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: YurichColors.textSecondary),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: YurichColors.textPrimary,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

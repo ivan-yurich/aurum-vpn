@@ -98,6 +98,16 @@ class BoxService(
                     stopService()
                 }
 
+                Action.SERVICE_RESTART -> {
+                    serviceScope.launch {
+                        if (status.value == Status.Started) {
+                            restartFromWatchdog("notification-action")
+                        } else if (status.value == Status.Stopped) {
+                            onStartCommand()
+                        }
+                    }
+                }
+
 
                 PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED -> {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -389,6 +399,7 @@ class BoxService(
             android.util.Log.e("BoxService", "Registering broadcast receivers")
             ContextCompat.registerReceiver(service, receiver, IntentFilter().apply {
                 addAction(Action.SERVICE_CLOSE)
+                addAction(Action.SERVICE_RESTART)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     addAction(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED)
                 }
