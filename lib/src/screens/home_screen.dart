@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -14,25 +15,25 @@ import '../services/profile_importer.dart';
 import '../services/profile_store.dart';
 import '../services/sing_box_config_builder.dart';
 import '../services/vpn_engine.dart';
+import '../theme/yurich_theme.dart';
 import 'qr_scan_screen.dart';
 
-const _gold = Color(0xFF0EA5FF);
-const _goldSoft = Color(0xFFEAF7FF);
-const _danger = Color(0xFFFF3B5C);
-const _dangerSoft = Color(0xFFFFD7DF);
-const _ink = Color(0xFF06111C);
-const _surface = Color(0xFF0D1A27);
-const _surfaceMetric = Color(0xFF10283B);
-const _mutedGold = Color(0xFF8EA9BD);
-const _cyanGlow = Color(0xFF22D3EE);
-const _deepGlow = Color(0xFF075985);
-const _nightGlow = Color(0xFF071827);
+const _gold = YurichColors.accentBlue;
+const _goldSoft = YurichColors.accentSoft;
+const _danger = YurichColors.danger;
+const _dangerSoft = YurichColors.dangerSoft;
+const _ink = YurichColors.background;
+const _surface = YurichColors.surfaceSolid;
+const _surfaceMetric = YurichColors.surfaceMetric;
+const _mutedGold = YurichColors.textSecondary;
+const _cyanGlow = YurichColors.accentCyan;
+const _deepGlow = YurichColors.backgroundDeep;
 const _appName = 'Yurich Connect';
 const _telegramUrl = 'https://t.me/ivan_it_net';
 const _vkUrl = 'https://vk.com/ivan_yurievich_it';
 const _donateUrl = 'https://dzen.ru/ivanyurievich?donate=true';
 const _supportEmail = 'ai@ivan-it.net';
-const _appVersion = '1.0.57';
+const _appVersionFallback = '1.0.58';
 const _nativeShortTimeout = Duration(seconds: 3);
 const _nativeConfigTimeout = Duration(seconds: 5);
 const _nativeStartTimeout = Duration(seconds: 8);
@@ -149,6 +150,8 @@ class _HomeScreenState extends State<HomeScreen>
   String _downlink = '0 B/s';
   String _sessionTotal = '0 B';
   String _message = 'Готов к импорту подписки';
+  String _appVersion = _appVersionFallback;
+  String _appBuildNumber = '';
   String? _lastError;
   bool _busy = false;
   bool _updateBusy = false;
@@ -269,6 +272,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _load() async {
+    final appInfo = await _loadAppInfo();
     final storedProfiles = await _store.loadProfiles();
     final profiles = _clientSupportedProfiles(storedProfiles);
     if (profiles.length != storedProfiles.length) {
@@ -286,6 +290,8 @@ class _HomeScreenState extends State<HomeScreen>
         : (profiles.isEmpty ? null : profiles.first.id);
     setState(() {
       _language = language;
+      _appVersion = appInfo.version;
+      _appBuildNumber = appInfo.buildNumber;
       _profiles = profiles;
       _selectedProfileId = resolvedSelectedId;
       _message = profiles.isEmpty
@@ -300,6 +306,20 @@ class _HomeScreenState extends State<HomeScreen>
         unawaited(_checkLatestUpdateNotice());
       }
     });
+  }
+
+  Future<({String version, String buildNumber})> _loadAppInfo() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      return (
+        version: info.version.trim().isEmpty
+            ? _appVersionFallback
+            : info.version,
+        buildNumber: info.buildNumber,
+      );
+    } on Object {
+      return (version: _appVersionFallback, buildNumber: '');
+    }
   }
 
   Future<void> _initVpn() async {
@@ -473,8 +493,8 @@ class _HomeScreenState extends State<HomeScreen>
               child: Material(
                 color: _surface,
                 elevation: 18,
-                shadowColor: Colors.black54,
-                borderRadius: BorderRadius.circular(8),
+                shadowColor: YurichColors.shadow,
+                borderRadius: BorderRadius.circular(YurichRadii.card),
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.all(16),
                   child: Column(
@@ -2100,6 +2120,7 @@ class _HomeScreenState extends State<HomeScreen>
     final lines = <String>[
       '$_appName diagnostic',
       'app_version: $_appVersion',
+      if (_appBuildNumber.isNotEmpty) 'app_build: $_appBuildNumber',
       'generated_local: ${now.toIso8601String()}',
       'generated_utc: ${now.toUtc().toIso8601String()}',
       'platform: ${Platform.operatingSystem} ${Platform.operatingSystemVersion}',
@@ -2389,13 +2410,7 @@ class _HomeScreenState extends State<HomeScreen>
         ),
       ),
       body: DecoratedBox(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [_ink, _nightGlow, Color(0xFF03101A)],
-          ),
-        ),
+        decoration: const BoxDecoration(gradient: YurichGradients.background),
         child: SafeArea(
           child: Column(
             children: [
@@ -2487,13 +2502,7 @@ class _AppBarGradient extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const DecoratedBox(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF071A2A), Color(0xFF0B2B40), _ink],
-        ),
-      ),
+      decoration: BoxDecoration(gradient: YurichGradients.header),
     );
   }
 }
@@ -2538,13 +2547,13 @@ class _StatusPanel extends StatelessWidget {
     final accent = degraded
         ? _danger
         : connected
-        ? _gold
-        : Colors.white12;
+        ? _cyanGlow
+        : YurichColors.border;
     final glow = degraded
         ? _danger.withValues(alpha: 0.22)
         : connected
-        ? _gold.withValues(alpha: 0.18)
-        : Colors.black26;
+        ? _cyanGlow.withValues(alpha: 0.18)
+        : YurichColors.shadow;
 
     return AnimatedBuilder(
       animation: pulse,
@@ -2554,16 +2563,12 @@ class _StatusPanel extends StatelessWidget {
           height: 166,
           child: DecoratedBox(
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: degraded
-                    ? const [Color(0xFF2A111B), Color(0xFF411623), _surface]
-                    : connected
-                    ? const [Color(0xFF0B2B40), Color(0xFF0E3A56), _surface]
-                    : const [_surface, Color(0xFF0A1B29)],
-              ),
-              borderRadius: BorderRadius.circular(8),
+              gradient: degraded
+                  ? YurichGradients.errorCard
+                  : connected
+                  ? YurichGradients.activeCard
+                  : YurichGradients.inactiveCard,
+              borderRadius: BorderRadius.circular(YurichRadii.card),
               border: Border.all(
                 color: connected || degraded
                     ? accent.withValues(alpha: 0.74 + glowPower * 0.26)
@@ -2688,26 +2693,16 @@ class _UptimeButton extends StatelessWidget {
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  gradient: RadialGradient(
-                    colors: connected
-                        ? degraded
-                              ? const [
-                                  Color(0xFFFFD7DF),
-                                  Color(0xFFFF6B81),
-                                  Color(0xFFFF244A),
-                                ]
-                              : const [
-                                  Color(0xFFEAF7FF),
-                                  Color(0xFF67E8F9),
-                                  Color(0xFF0EA5FF),
-                                ]
-                        : const [Color(0xFF10283B), _surfaceMetric],
-                  ),
+                  gradient: connected
+                      ? degraded
+                            ? YurichGradients.dangerButton
+                            : YurichGradients.cyanButton
+                      : YurichGradients.idleButton,
                   border: Border.all(
                     color: degraded
-                        ? const Color(0xFFFFB3C0)
+                        ? YurichColors.dangerSoft
                         : connected
-                        ? const Color(0xFFA7F3FF)
+                        ? YurichColors.accentSoft
                         : _gold.withValues(alpha: 0.35),
                     width: connected ? 2.2 : 1.5,
                   ),
@@ -2717,7 +2712,7 @@ class _UptimeButton extends StatelessWidget {
                           ? _danger.withValues(alpha: 0.42 + glowPower * 0.28)
                           : connected
                           ? _cyanGlow.withValues(alpha: 0.42 + glowPower * 0.3)
-                          : Colors.black38,
+                          : YurichColors.shadow,
                       blurRadius: connected ? 28 + glowPower * 18 : 20,
                       spreadRadius: glowPower * 2,
                       offset: const Offset(0, 12),
@@ -2808,13 +2803,9 @@ class _Metric extends StatelessWidget {
       height: fixed ? 52 : null,
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [_surfaceMetric, Color(0xFF0C3148)],
-        ),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _gold.withValues(alpha: 0.18)),
+        gradient: YurichGradients.metric,
+        borderRadius: BorderRadius.circular(YurichRadii.control),
+        border: Border.all(color: YurichColors.border),
       ),
       alignment: Alignment.center,
       child: fixed
@@ -3028,7 +3019,7 @@ class _ProfileTabBar extends StatelessWidget {
                 final selected = selectedTab == tab;
                 return DecoratedBox(
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(YurichRadii.chip),
                     boxShadow: selected
                         ? [
                             BoxShadow(
@@ -3060,7 +3051,7 @@ class _ProfileTabBar extends StatelessWidget {
                   letterSpacing: 0,
                 ),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(YurichRadii.chip),
                   side: BorderSide(
                     color: selectedTab == tab
                         ? _goldSoft.withValues(alpha: 0.95)
@@ -3149,7 +3140,7 @@ class _ProfileTile extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: selected ? Colors.white : null,
+                  color: selected ? YurichColors.textPrimary : null,
                   fontWeight: selected ? FontWeight.w800 : FontWeight.w700,
                 ),
               ),
@@ -3185,9 +3176,7 @@ class _ProfileTile extends StatelessWidget {
                   children: [
                     DecoratedBox(
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF67E8F9), Color(0xFF0EA5FF)],
-                        ),
+                        gradient: YurichGradients.activeBadge,
                         borderRadius: BorderRadius.circular(999),
                         boxShadow: [
                           BoxShadow(
@@ -3228,8 +3217,8 @@ class _ProfileTile extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             decoration: BoxDecoration(
               color: _surfaceMetric,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: _gold.withValues(alpha: 0.18)),
+              borderRadius: BorderRadius.circular(YurichRadii.chip),
+              border: Border.all(color: YurichColors.border),
             ),
             alignment: Alignment.center,
             child: FittedBox(
@@ -3266,28 +3255,16 @@ class _ProfileTile extends StatelessWidget {
             ? _cyanGlow.withValues(alpha: 0.98)
             : selected
             ? _goldSoft.withValues(alpha: 0.92)
-            : Colors.white12;
+            : YurichColors.border;
         return InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(YurichRadii.panel),
           child: Ink(
             decoration: BoxDecoration(
               gradient: selected
-                  ? const LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        Color(0xFF0E4A68),
-                        Color(0xFF0A2C42),
-                        Color(0xFF071C2B),
-                      ],
-                    )
-                  : const LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [_surface, Color(0xFF0A1723)],
-                    ),
-              borderRadius: BorderRadius.circular(8),
+                  ? YurichGradients.selectedProfile
+                  : YurichGradients.inactiveCard,
+              borderRadius: BorderRadius.circular(YurichRadii.panel),
               border: Border.all(
                 color: borderColor,
                 width: selected || active ? 2 : 1,
@@ -3306,7 +3283,7 @@ class _ProfileTile extends StatelessWidget {
                   : null,
             ),
             child: ClipRRect(
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: BorderRadius.circular(YurichRadii.panel - 2),
               child: Stack(
                 children: [
                   if (selected || active)
@@ -3319,8 +3296,11 @@ class _ProfileTile extends StatelessWidget {
                             begin: Alignment.topCenter,
                             end: Alignment.bottomCenter,
                             colors: active
-                                ? const [Color(0xFF67E8F9), Color(0xFF0EA5FF)]
-                                : const [Color(0xFFEAF7FF), Color(0xFF67E8F9)],
+                                ? YurichGradients.activeBadge.colors
+                                : const [
+                                    YurichColors.accentSoft,
+                                    YurichColors.accentCyan,
+                                  ],
                           ),
                           boxShadow: [
                             BoxShadow(
@@ -3364,9 +3344,9 @@ class _EmptyProfiles extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: _surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white12),
+        color: YurichColors.surface,
+        borderRadius: BorderRadius.circular(YurichRadii.panel),
+        border: Border.all(color: YurichColors.border),
       ),
       child: Text(message ?? strings!.emptyProfiles),
     );
@@ -3409,11 +3389,11 @@ class _ProfileInsightPanel extends StatelessWidget {
           end: Alignment.bottomRight,
           colors: [
             _surfaceMetric.withValues(alpha: 0.9),
-            const Color(0xFF0A2132).withValues(alpha: 0.88),
+            YurichColors.surfaceElevated.withValues(alpha: 0.88),
           ],
         ),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _gold.withValues(alpha: 0.18)),
+        borderRadius: BorderRadius.circular(YurichRadii.panel),
+        border: Border.all(color: YurichColors.border),
         boxShadow: [
           BoxShadow(
             color: _deepGlow.withValues(alpha: 0.12),
@@ -3598,7 +3578,7 @@ class _InsightRow extends StatelessWidget {
 
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(YurichRadii.control),
       child: child,
     );
   }
@@ -3649,13 +3629,9 @@ class _AppCenterPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [_surface, Color(0xFF081D2C), Color(0xFF071522)],
-        ),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: _gold.withValues(alpha: 0.22)),
+        gradient: YurichGradients.centerPanel,
+        borderRadius: BorderRadius.circular(YurichRadii.card),
+        border: Border.all(color: YurichColors.border),
         boxShadow: [
           BoxShadow(
             color: _gold.withValues(alpha: 0.06),
@@ -3711,11 +3687,7 @@ class _PanelDivider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Divider(
-      height: 18,
-      thickness: 1,
-      color: _gold.withValues(alpha: 0.14),
-    );
+    return Divider(height: 18, thickness: 1, color: YurichColors.border);
   }
 }
 
@@ -3843,7 +3815,7 @@ class _SupportPanel extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
                 color: _surfaceMetric,
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(YurichRadii.control),
                 border: Border.all(color: _gold.withValues(alpha: 0.16)),
               ),
               child: Row(
@@ -3909,7 +3881,9 @@ class _SupportActionButton extends StatelessWidget {
         alignment: Alignment.center,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         side: BorderSide(color: _gold.withValues(alpha: 0.28)),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(YurichRadii.control),
+        ),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -3971,7 +3945,7 @@ class _UpdatePanel extends StatelessWidget {
         DecoratedBox(
           decoration: BoxDecoration(
             color: _surface,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(YurichRadii.panel),
             border: Border.all(color: _gold.withValues(alpha: 0.18)),
           ),
           child: Padding(
@@ -3983,7 +3957,7 @@ class _UpdatePanel extends StatelessWidget {
                   DecoratedBox(
                     decoration: BoxDecoration(
                       color: _gold.withValues(alpha: 0.13),
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(YurichRadii.control),
                       border: Border.all(color: _gold.withValues(alpha: 0.32)),
                     ),
                     child: Padding(
@@ -4076,8 +4050,8 @@ class _FaqPanel extends StatelessWidget {
             child: DecoratedBox(
               decoration: BoxDecoration(
                 color: _surface,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.white12),
+                borderRadius: BorderRadius.circular(YurichRadii.panel),
+                border: Border.all(color: YurichColors.border),
               ),
               child: Padding(
                 padding: const EdgeInsets.all(12),
@@ -4127,7 +4101,7 @@ class _LogsPanel extends StatelessWidget {
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: _ink,
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(YurichRadii.panel),
             border: Border.all(color: _gold.withValues(alpha: 0.18)),
           ),
           child: Text(

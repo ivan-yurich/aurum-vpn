@@ -26,10 +26,11 @@ import io.nekohasekai.libbox.Libbox
 import io.nekohasekai.libbox.OverrideOptions
 import io.nekohasekai.libbox.PlatformInterface
 import io.nekohasekai.libbox.SystemProxyStatus
-import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -82,6 +83,7 @@ class BoxService(
         ServiceNotification(status, service) 
     }
     private var commandServer: CommandServer? = null
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var watchdogJob: Job? = null
     private var watchdogFailures = 0
     private var watchdogMixedProxyEnabled = false
@@ -108,6 +110,10 @@ class BoxService(
     }
 
     private fun startCommandServer() {
+        if (commandServer != null) {
+            android.util.Log.d("BoxService", "Command server already started")
+            return
+        }
         val commandServer = CommandServer(this, platformInterface)
         commandServer.start()
         this.commandServer = commandServer
@@ -247,14 +253,12 @@ class BoxService(
         refreshKeeperWakeLock("device-idle")
     }
 
-    @OptIn(DelicateCoroutinesApi::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private fun startTrafficMonitor() {
         // Nothing to do here - we're using StatusClient to get traffic updates
         // This method is kept for backwards compatibility
         android.util.Log.d("BoxService", "Traffic monitoring is now handled by StatusClient")
     }
 
-    @OptIn(DelicateCoroutinesApi::class)
     private fun stopService() {
         if (status.value != Status.Started && status.value != Status.Starting) return
         stopNativeWatchdog()
@@ -275,7 +279,7 @@ class BoxService(
             receiverRegistered = false
         }
         notification.stop()
-        GlobalScope.launch(Dispatchers.IO) {
+        serviceScope.launch {
             val pfd = fileDescriptor
             if (pfd != null) {
                 pfd.close()
@@ -353,7 +357,6 @@ class BoxService(
         }
     }
 
-    @OptIn(DelicateCoroutinesApi::class)
     @Suppress("SameReturnValue")
     internal fun onStartCommand(): Int {
         Application.initializeIfNeeded(service.applicationContext)
@@ -394,7 +397,7 @@ class BoxService(
         }
 
         android.util.Log.e("BoxService", "Launching IO coroutine for service startup")
-        GlobalScope.launch(Dispatchers.IO) {
+        serviceScope.launch {
             try {
                 android.util.Log.e("BoxService", "Ensuring libbox initialization")
                 Application.ensureLibboxInitialized(service.applicationContext)
@@ -421,6 +424,7 @@ class BoxService(
             SimpleConfigManager.getStartedByUser() && SimpleConfigManager.hasValidConfig()
         }.getOrDefault(false)
         stopNativeWatchdog()
+        serviceScope.cancel()
         releaseKeeperWakeLock()
         runCatching {
             if (receiverRegistered) {
@@ -501,7 +505,7 @@ class BoxService(
             return
         }
 
-        watchdogJob = GlobalScope.launch(Dispatchers.IO) {
+        watchdogJob = serviceScope.launch {
             delay(WATCHDOG_INITIAL_GRACE_MS)
             while (isActive && status.value == Status.Started) {
                 refreshKeeperWakeLock("watchdog")

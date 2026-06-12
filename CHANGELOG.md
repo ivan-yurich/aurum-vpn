@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.58 - 2026-06-12
+
+- Added a shared Yurich Connect dark cyber/glass design system and moved the
+  main app theme to reusable color, gradient, and radius tokens.
+- Polished the Android home screen panels, profile cards, filter chips, status
+  card, and import dialog to keep the UI consistent with the premium cyan
+  brand style.
+- Replaced the hardcoded in-app version with the Android package version via
+  `package_info_plus`, so updater checks and diagnostics match the installed
+  APK.
+- Hardened the native VPN service lifecycle by replacing `GlobalScope` usage in
+  `BoxService` with a service-owned coroutine scope and guarding duplicate
+  command-server starts.
+- Kept the supported stable protocol set: VLESS Reality, NaiveProxy, and
+  Hysteria/Hysteria2.
+
 ## 1.0.57 - 2026-06-09
 
 - Restored NaiveProxy support in the Android client while keeping the Xray
