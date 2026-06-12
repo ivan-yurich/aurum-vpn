@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.60 - 2026-06-12
+
+- Reworked Android in-app update installation to use `PackageInstaller`
+  sessions first, with the classic APK view intent kept only as a fallback.
+- Removed fragile installer extras that could make some Android/Honor package
+  installers close without completing the update.
+- The update APK is now prepared in app-specific external cache when available
+  so Android's package installer can read it more reliably.
+- Prepared the release flow to publish ABI-specific APKs again, giving phones a
+  smaller update file than the universal APK.
+
 ## 1.0.59 - 2026-06-12
 
 - Added a shared connection UI state model for the app and native Android
