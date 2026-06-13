@@ -123,10 +123,20 @@ class AppUpdateService {
     AppUpdateInfo update, {
     required void Function(double? progress) onProgress,
   }) async {
-    final tempDir = await Directory.systemTemp.createTemp('yurich_connect_');
+    final tempDir = Directory(
+      '${Directory.systemTemp.path}${Platform.pathSeparator}'
+      'yurich_connect_updates',
+    );
+    if (!await tempDir.exists()) {
+      await tempDir.create(recursive: true);
+    }
     final file = File(
       '${tempDir.path}${Platform.pathSeparator}${update.assetName}',
     );
+    if (await _isCompleteDownloadedFile(file, update.size)) {
+      onProgress(1);
+      return file;
+    }
 
     Object? lastError;
     final urls = <Uri>{
@@ -195,6 +205,29 @@ class AppUpdateService {
       await sink.close();
     }
     onProgress(1);
+
+    final expectedSize = update.size;
+    if (expectedSize != null && expectedSize > 0) {
+      final actualSize = await file.length();
+      if (actualSize != expectedSize) {
+        throw StateError(
+          'APK size mismatch: expected $expectedSize bytes, got $actualSize.',
+        );
+      }
+    }
+  }
+
+  Future<bool> _isCompleteDownloadedFile(File file, int? expectedSize) async {
+    if (!await file.exists()) {
+      return false;
+    }
+    final actualSize = await file.length();
+    if (actualSize <= 0) {
+      return false;
+    }
+    return expectedSize == null ||
+        expectedSize <= 0 ||
+        actualSize == expectedSize;
   }
 
   Future<void> installApk(File file) async {

@@ -99,13 +99,13 @@ class MainActivity : FlutterActivity() {
 
         try {
             val installFile = prepareInstallFile(apkFile)
-            installWithPackageInstaller(installFile)
+            openInstallIntent(installFile)
             result.success(null)
         } catch (error: Exception) {
-            Log.w(TAG, "PackageInstaller update failed, falling back to ACTION_VIEW", error)
+            Log.w(TAG, "ACTION_VIEW update failed, falling back to PackageInstaller", error)
             try {
                 val installFile = prepareInstallFile(apkFile)
-                openInstallIntent(installFile)
+                installWithPackageInstaller(installFile)
                 result.success(null)
             } catch (fallbackError: ActivityNotFoundException) {
                 result.error("INSTALL_FAILED", "Android package installer was not found", null)
