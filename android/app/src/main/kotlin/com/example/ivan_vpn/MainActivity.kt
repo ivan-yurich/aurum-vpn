@@ -18,7 +18,6 @@ import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
 import androidx.core.content.FileProvider
-import androidx.core.content.IntentSanitizer
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -217,32 +216,28 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun sanitizeInstallConfirmation(rawIntent: Intent): Intent? {
-        val sanitized = try {
-            IntentSanitizer.Builder()
-                .allowAnyComponent()
-                .allowFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                .allowAction { action ->
-                    action == null ||
-                        action.startsWith("android.intent.action.") ||
-                        action.startsWith("android.content.pm.action.")
-                }
-                .build()
-                .sanitizeByFiltering(rawIntent)
-        } catch (error: Exception) {
-            Log.w(TAG, "Package installer confirmation intent was rejected", error)
+        if (!isPackageInstallerAction(rawIntent.action)) {
+            Log.w(TAG, "Package installer confirmation intent action was rejected: ${rawIntent.action}")
             return null
         }
 
-        val trustedInstaller = findTrustedInstaller(sanitized) ?: return null
-        return Intent(sanitized).apply {
+        val trustedInstaller = findTrustedInstaller(rawIntent) ?: return null
+        return Intent(rawIntent).apply {
             component = ComponentName(
                 trustedInstaller.activityInfo.packageName,
                 trustedInstaller.activityInfo.name,
             )
             `package` = trustedInstaller.activityInfo.packageName
+            flags = rawIntent.flags and INSTALL_CONFIRMATION_ALLOWED_FLAGS
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
     }
+
+    private fun isPackageInstallerAction(action: String?): Boolean =
+        action == null ||
+            action == Intent.ACTION_VIEW ||
+            action.startsWith("android.content.pm.action.") ||
+            action.startsWith("android.intent.action.INSTALL")
 
     private fun findTrustedInstaller(intent: Intent): ResolveInfo? =
         packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
@@ -344,5 +339,10 @@ class MainActivity : FlutterActivity() {
         const val APK_MIME_TYPE = "application/vnd.android.package-archive"
         const val ACTION_PACKAGE_INSTALL_STATUS = "online.dnsai.ivanvpn.UPDATE_INSTALL_STATUS"
         const val EXTRA_PACKAGE_INSTALL_SESSION_ID = "package_install_session_id"
+        val INSTALL_CONFIRMATION_ALLOWED_FLAGS =
+            Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                Intent.FLAG_ACTIVITY_NO_HISTORY
     }
 }

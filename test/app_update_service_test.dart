@@ -48,4 +48,46 @@ void main() {
       expect(update.assetName, 'YurichConnect-android-release.apk');
     },
   );
+
+  test('prefers ABI split APK over universal release APK', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+
+    server.listen((request) async {
+      final payload = {
+        'tag_name': 'v1.0.62',
+        'assets': [
+          {
+            'name': 'YurichConnect-android-release.apk',
+            'browser_download_url':
+                'http://127.0.0.1:${server.port}/universal.apk',
+            'size': 97988903,
+          },
+          {
+            'name': 'YurichConnect-android-arm64-v8a-v1.0.62.apk',
+            'browser_download_url': 'http://127.0.0.1:${server.port}/arm64.apk',
+            'size': 34563166,
+          },
+        ],
+      };
+      request.response
+        ..statusCode = HttpStatus.ok
+        ..headers.contentType = ContentType.json
+        ..write(jsonEncode(payload));
+      await request.response.close();
+    });
+
+    final service = AppUpdateService(
+      releaseApiUris: [Uri.parse('http://127.0.0.1:${server.port}/latest')],
+    );
+
+    final update = await service.findLatest(
+      currentVersion: '1.0.61',
+      supportedAbis: const ['arm64-v8a', 'armeabi-v7a'],
+    );
+
+    expect(update, isNotNull);
+    expect(update!.version, '1.0.62');
+    expect(update.assetName, 'YurichConnect-android-arm64-v8a-v1.0.62.apk');
+  });
 }

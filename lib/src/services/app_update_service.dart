@@ -299,15 +299,22 @@ class AppUpdateService {
       return null;
     }
 
-    final assetName = _githubReleaseAssetName;
-    final urls = _githubDownloadUrls(tag, assetName);
-    return AppUpdateInfo(
-      version: _normalizeVersion(tag),
-      assetName: assetName,
-      downloadUrl: urls.first,
-      fallbackDownloadUrls: urls.skip(1).toList(growable: false),
-      size: await _tryFetchContentLength(urls.first),
-    );
+    for (final assetName in _githubAssetNameCandidates(tag, supportedAbis)) {
+      final urls = _githubDownloadUrls(tag, assetName);
+      final size = await _tryFetchContentLength(urls.first);
+      if (size == null && assetName != _githubReleaseAssetName) {
+        continue;
+      }
+      return AppUpdateInfo(
+        version: _normalizeVersion(tag),
+        assetName: assetName,
+        downloadUrl: urls.first,
+        fallbackDownloadUrls: urls.skip(1).toList(growable: false),
+        size: size,
+      );
+    }
+
+    return null;
   }
 
   Future<String?> _fetchLatestGitHubTag() async {
@@ -384,6 +391,22 @@ class AppUpdateService {
       Uri.parse(
         'https://github.com/$_githubRepository/releases/latest/download/$assetName',
       ),
+    ];
+  }
+
+  List<String> _githubAssetNameCandidates(
+    String version,
+    List<String> supportedAbis,
+  ) {
+    final normalized = _normalizeVersion(version);
+    return [
+      if (supportedAbis.contains('arm64-v8a'))
+        'YurichConnect-android-arm64-v8a-v$normalized.apk',
+      if (supportedAbis.contains('armeabi-v7a'))
+        'YurichConnect-android-armeabi-v7a-v$normalized.apk',
+      if (supportedAbis.contains('x86_64'))
+        'YurichConnect-android-x86_64-v$normalized.apk',
+      _githubReleaseAssetName,
     ];
   }
 
