@@ -2,10 +2,13 @@ package online.dnsai.ivanvpn
 
 import android.content.ClipData
 import android.content.ActivityNotFoundException
+import android.content.ComponentName
 import android.content.Intent
 import android.app.PendingIntent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -13,6 +16,7 @@ import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
 import androidx.core.content.FileProvider
+import androidx.core.content.IntentSanitizer
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -168,8 +172,9 @@ class MainActivity : FlutterActivity() {
                         @Suppress("DEPRECATION")
                         intent.getParcelableExtra(Intent.EXTRA_INTENT)
                     }
-                    if (confirmation != null) {
-                        startActivity(confirmation.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    val safeConfirmation = confirmation?.let(::sanitizeInstallConfirmation)
+                    if (safeConfirmation != null) {
+                        startActivity(safeConfirmation)
                     } else {
                         Toast.makeText(this, "Не удалось открыть установщик Android", Toast.LENGTH_LONG)
                             .show()
@@ -189,6 +194,44 @@ class MainActivity : FlutterActivity() {
             Toast.makeText(this, "Установщик Android не найден", Toast.LENGTH_LONG).show()
         }
     }
+
+    private fun sanitizeInstallConfirmation(rawIntent: Intent): Intent? {
+        val sanitized = try {
+            IntentSanitizer.Builder()
+                .allowAnyComponent()
+                .allowFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .allowAction { action ->
+                    action == null ||
+                        action.startsWith("android.intent.action.") ||
+                        action.startsWith("android.content.pm.action.")
+                }
+                .build()
+                .sanitizeByFiltering(rawIntent)
+        } catch (error: Exception) {
+            Log.w(TAG, "Package installer confirmation intent was rejected", error)
+            return null
+        }
+
+        val trustedInstaller = findTrustedInstaller(sanitized) ?: return null
+        return Intent(sanitized).apply {
+            component = ComponentName(
+                trustedInstaller.activityInfo.packageName,
+                trustedInstaller.activityInfo.name,
+            )
+            `package` = trustedInstaller.activityInfo.packageName
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+    }
+
+    private fun findTrustedInstaller(intent: Intent): ResolveInfo? =
+        packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+            .firstOrNull { resolveInfo ->
+                val appInfo = resolveInfo.activityInfo?.applicationInfo ?: return@firstOrNull false
+                val flags = appInfo.flags
+                resolveInfo.activityInfo.packageName != packageName &&
+                    (flags and ApplicationInfo.FLAG_SYSTEM != 0 ||
+                        flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP != 0)
+            }
 
     private fun buildInstallIntent(uri: Uri): Intent =
         Intent(Intent.ACTION_VIEW).apply {

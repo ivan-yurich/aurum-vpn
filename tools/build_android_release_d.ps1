@@ -24,13 +24,40 @@ New-Item -ItemType Directory -Force -Path $env:GRADLE_USER_HOME | Out-Null
 New-Item -ItemType Directory -Force -Path $env:PUB_CACHE | Out-Null
 New-Item -ItemType Directory -Force -Path $apkOut | Out-Null
 
+function Invoke-Checked {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Step,
+        [Parameter(Mandatory = $true)]
+        [scriptblock] $Command
+    )
+
+    & $Command
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Step failed with exit code $LASTEXITCODE"
+    }
+}
+
+function Clear-FlutterAotCache {
+    $flutterBuild = Join-Path $repoRoot ".dart_tool\flutter_build"
+    if (Test-Path -LiteralPath $flutterBuild) {
+        Remove-Item -LiteralPath $flutterBuild -Recurse -Force
+    }
+}
+
 Push-Location $repoRoot
 try {
-    & $flutter pub get
-    & $flutter analyze
-    & $flutter test --reporter compact
-    & $flutter build apk --release
-    & $flutter build apk --release --split-per-abi
+    Invoke-Checked "flutter pub get" { & $flutter pub get }
+    Invoke-Checked "flutter analyze" { & $flutter analyze }
+    Invoke-Checked "flutter test" { & $flutter test --reporter compact }
+
+    Clear-FlutterAotCache
+    Invoke-Checked "flutter build apk --release" { & $flutter build apk --release }
+
+    Clear-FlutterAotCache
+    Invoke-Checked "flutter build apk --release --split-per-abi" {
+        & $flutter build apk --release --split-per-abi
+    }
 
     $versionLine = Select-String -LiteralPath "pubspec.yaml" -Pattern "^version:\s*(.+)$" |
         Select-Object -First 1
