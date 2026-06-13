@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $buildRoot = "D:\Yurich Connect\BuildCache"
-$flutter = "C:\Users\ivan-\Downloads\flutter_windows_3.41.9-stable\flutter\bin\flutter.bat"
+$flutter = "D:\Yurich Connect\SDK\flutter_windows_3.41.9-stable\flutter\bin\flutter.bat"
 
 $mySoft = [string]::Concat(
     [char]0x041C, [char]0x043E, [char]0x0439, " ",

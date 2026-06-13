@@ -12,6 +12,7 @@ import '../models/connection_status.dart';
 import '../models/connection_ui_state.dart';
 import '../models/vpn_profile.dart';
 import '../services/app_update_service.dart';
+import '../services/power_manager_service.dart';
 import '../services/profile_geo_service.dart';
 import '../services/profile_importer.dart';
 import '../services/profile_store.dart';
@@ -116,12 +117,13 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final _vpnEngine = createVpnEngine();
   final _store = ProfileStore();
   final _importer = ProfileImporter();
   final _configBuilder = SingBoxConfigBuilder();
   final _updateService = AppUpdateService();
+  final _powerManagerService = PowerManagerService();
   final _geoService = ProfileGeoService();
   final _manualController = TextEditingController();
 
@@ -174,6 +176,9 @@ class _HomeScreenState extends State<HomeScreen>
   AppUpdateInfo? _availableUpdate;
   double? _updateProgress;
   bool _updateNoticeShown = false;
+  bool _batteryOptimizationIgnored = true;
+  bool _batteryOptimizationCheckInFlight = false;
+  bool _batteryOptimizationPromptShown = false;
   DateTime? _nextAutoReconnectAt;
   DateTime? _nextTunnelHealthCheckAt;
   int _autoReconnectAttempts = 0;
@@ -289,6 +294,7 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _glowController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2400),
@@ -313,10 +319,14 @@ class _HomeScreenState extends State<HomeScreen>
       const Duration(hours: 6),
       (_) => unawaited(_showSubscriptionRenewalReminder(_profiles)),
     );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_refreshBatteryOptimizationStatus(prompt: true));
+    });
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _statusSubscription?.cancel();
     _trafficSubscription?.cancel();
     _logSubscription?.cancel();
@@ -329,6 +339,13 @@ class _HomeScreenState extends State<HomeScreen>
     _glowController.dispose();
     unawaited(_vpnEngine.dispose());
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_refreshBatteryOptimizationStatus());
+    }
   }
 
   Future<void> _load() async {
@@ -534,6 +551,43 @@ class _HomeScreenState extends State<HomeScreen>
       );
     } finally {
       _notificationSyncInFlight = false;
+    }
+  }
+
+  Future<void> _refreshBatteryOptimizationStatus({bool prompt = false}) async {
+    if (!Platform.isAndroid || _batteryOptimizationCheckInFlight) {
+      return;
+    }
+    _batteryOptimizationCheckInFlight = true;
+    try {
+      final ignored = await _powerManagerService
+          .isIgnoringBatteryOptimizations()
+          .timeout(const Duration(seconds: 2), onTimeout: () => true);
+      if (!mounted) {
+        return;
+      }
+      setState(() => _batteryOptimizationIgnored = ignored);
+      if (!ignored && prompt && !_batteryOptimizationPromptShown) {
+        _batteryOptimizationPromptShown = true;
+        _showSnack(
+          s.batteryOptimizationSnack,
+          action: SnackBarAction(
+            label: s.backgroundModeRequest,
+            onPressed: () => unawaited(_requestBackgroundPowerAccess()),
+          ),
+        );
+      }
+    } finally {
+      _batteryOptimizationCheckInFlight = false;
+    }
+  }
+
+  Future<void> _requestBackgroundPowerAccess() async {
+    await _powerManagerService.requestIgnoreBatteryOptimizations();
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    await _refreshBatteryOptimizationStatus();
+    if (mounted) {
+      _showSnack(s.batteryOptimizationOpened);
     }
   }
 
@@ -976,6 +1030,7 @@ class _HomeScreenState extends State<HomeScreen>
       return;
     }
 
+    unawaited(_refreshBatteryOptimizationStatus(prompt: true));
     _autoRecoveryArmed = true;
     await _runBusy(() async {
       try {
@@ -2217,6 +2272,7 @@ class _HomeScreenState extends State<HomeScreen>
       'locale: ${Platform.localeName}',
       'config_target: ${_vpnEngine.configTarget.name}',
       if (_lastConfigSummary != null) 'config: $_lastConfigSummary',
+      'battery_optimization_ignored: $_batteryOptimizationIgnored',
       'status: $_status',
       'connection_degraded: $_connectionDegraded',
       'message: ${_redactSensitive(_message)}',
@@ -2546,12 +2602,15 @@ class _HomeScreenState extends State<HomeScreen>
                       subscriptionRefreshBusy: _subscriptionRefreshBusy,
                       subscriptionStatus: _subscriptionTileStatus,
                       subscriptionNeedsAttention: _subscriptionNeedsAttention,
+                      batteryOptimizationIgnored: _batteryOptimizationIgnored,
                       kindLabel: _profileKindLabel,
                       displayName: _profileDisplayName,
                       countryFlag: _profileCountryFlag,
                       pingLabel: _profilePingLabel,
                       onPingAll: () => unawaited(_pingProfiles(_profiles)),
                       onPing: (profile) => unawaited(_pingProfile(profile)),
+                      onRequestBackgroundAccess: () =>
+                          unawaited(_requestBackgroundPowerAccess()),
                     ),
                     const SizedBox(height: 16),
                     _AppCenterPanel(
@@ -3002,12 +3061,14 @@ class _ProfilePanel extends StatelessWidget {
     required this.subscriptionRefreshBusy,
     required this.subscriptionStatus,
     required this.subscriptionNeedsAttention,
+    required this.batteryOptimizationIgnored,
     required this.kindLabel,
     required this.displayName,
     required this.countryFlag,
     required this.pingLabel,
     required this.onPingAll,
     required this.onPing,
+    required this.onRequestBackgroundAccess,
   });
 
   final Animation<double> pulse;
@@ -3028,12 +3089,14 @@ class _ProfilePanel extends StatelessWidget {
   final bool subscriptionRefreshBusy;
   final String? Function(VpnProfile profile) subscriptionStatus;
   final bool Function(VpnProfile profile) subscriptionNeedsAttention;
+  final bool batteryOptimizationIgnored;
   final String Function(VpnProfileKind kind) kindLabel;
   final String Function(VpnProfile profile) displayName;
   final String? Function(VpnProfile profile) countryFlag;
   final String Function(VpnProfile profile) pingLabel;
   final VoidCallback onPingAll;
   final ValueChanged<VpnProfile> onPing;
+  final VoidCallback onRequestBackgroundAccess;
 
   @override
   Widget build(BuildContext context) {
@@ -3144,7 +3207,9 @@ class _ProfilePanel extends StatelessWidget {
               : subscriptionNeedsAttention(selectedProfile!),
           canRefreshSubscriptions: hasSubscriptionSources,
           subscriptionRefreshBusy: subscriptionRefreshBusy,
+          batteryOptimizationIgnored: batteryOptimizationIgnored,
           onRefreshSubscriptions: onRefreshSubscriptions,
+          onRequestBackgroundAccess: onRequestBackgroundAccess,
           onPing: selectedProfile == null
               ? null
               : () => onPing(selectedProfile!),
@@ -3527,7 +3592,9 @@ class _ProfileInsightPanel extends StatelessWidget {
     required this.subscriptionNeedsAttention,
     required this.canRefreshSubscriptions,
     required this.subscriptionRefreshBusy,
+    required this.batteryOptimizationIgnored,
     required this.onRefreshSubscriptions,
+    required this.onRequestBackgroundAccess,
     required this.onPing,
   });
 
@@ -3540,7 +3607,9 @@ class _ProfileInsightPanel extends StatelessWidget {
   final bool subscriptionNeedsAttention;
   final bool canRefreshSubscriptions;
   final bool subscriptionRefreshBusy;
+  final bool batteryOptimizationIgnored;
   final VoidCallback onRefreshSubscriptions;
+  final VoidCallback onRequestBackgroundAccess;
   final VoidCallback? onPing;
 
   @override
@@ -3613,6 +3682,19 @@ class _ProfileInsightPanel extends StatelessWidget {
                         icon: Icons.security_update_good_outlined,
                         label: strings.stabilityLabel,
                         value: strings.stabilityValue,
+                      ),
+                      _InsightRow(
+                        icon: Icons.battery_saver_outlined,
+                        label: strings.backgroundModeLabel,
+                        value: batteryOptimizationIgnored
+                            ? strings.backgroundModeAllowed
+                            : strings.backgroundModeRestricted,
+                        valueColor: batteryOptimizationIgnored
+                            ? null
+                            : _dangerSoft,
+                        onTap: batteryOptimizationIgnored
+                            ? null
+                            : onRequestBackgroundAccess,
                       ),
                       _InsightRow(
                         icon: Icons.event_available_outlined,
@@ -4339,6 +4421,12 @@ class _Strings {
     required this.dnsCountryValue,
     required this.stabilityLabel,
     required this.stabilityValue,
+    required this.backgroundModeLabel,
+    required this.backgroundModeAllowed,
+    required this.backgroundModeRestricted,
+    required this.backgroundModeRequest,
+    required this.batteryOptimizationSnack,
+    required this.batteryOptimizationOpened,
     required this.countryLabel,
     required this.pingLabel,
     required this.subscriptionLabel,
@@ -4422,6 +4510,12 @@ class _Strings {
   final String dnsCountryValue;
   final String stabilityLabel;
   final String stabilityValue;
+  final String backgroundModeLabel;
+  final String backgroundModeAllowed;
+  final String backgroundModeRestricted;
+  final String backgroundModeRequest;
+  final String batteryOptimizationSnack;
+  final String batteryOptimizationOpened;
   final String countryLabel;
   final String pingLabel;
   final String subscriptionLabel;
@@ -4716,6 +4810,14 @@ class _Strings {
     dnsCountryValue: 'Через профиль',
     stabilityLabel: 'Стабильность',
     stabilityValue: 'Фоновый keeper',
+    backgroundModeLabel: 'Фон',
+    backgroundModeAllowed: 'Без ограничений',
+    backgroundModeRestricted: 'Ограничен батареей',
+    backgroundModeRequest: 'Разрешить',
+    batteryOptimizationSnack:
+        'Для круглосуточной работы разреши Yurich Connect работу без ограничений батареи.',
+    batteryOptimizationOpened:
+        'Открыл настройки батареи. Разреши работу без ограничений и вернись в приложение.',
     countryLabel: 'Страна',
     pingLabel: 'Пинг',
     subscriptionLabel: 'Подписка',
@@ -4840,6 +4942,14 @@ class _Strings {
     dnsCountryValue: 'Through profile',
     stabilityLabel: 'Stability',
     stabilityValue: 'Background keeper',
+    backgroundModeLabel: 'Background',
+    backgroundModeAllowed: 'Unrestricted',
+    backgroundModeRestricted: 'Battery restricted',
+    backgroundModeRequest: 'Allow',
+    batteryOptimizationSnack:
+        'For 24/7 VPN, allow Yurich Connect to run without battery restrictions.',
+    batteryOptimizationOpened:
+        'Battery settings opened. Allow unrestricted background work, then return to the app.',
     countryLabel: 'Country',
     pingLabel: 'Ping',
     subscriptionLabel: 'Subscription',

@@ -3,6 +3,7 @@ package online.dnsai.ivanvpn
 import android.content.ClipData
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.app.PendingIntent
 import android.content.pm.ApplicationInfo
@@ -12,6 +13,7 @@ import android.content.pm.ResolveInfo
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
@@ -46,6 +48,25 @@ class MainActivity : FlutterActivity() {
                 "installApk" -> installApk(call.argument<String>("path"), result)
                 "openInstallSettings" -> {
                     openInstallSettings()
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "online.dnsai.ivanvpn/power",
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "isIgnoringBatteryOptimizations" ->
+                    result.success(isIgnoringBatteryOptimizations())
+                "requestIgnoreBatteryOptimizations" -> {
+                    requestIgnoreBatteryOptimizations()
+                    result.success(null)
+                }
+                "openBatteryOptimizationSettings" -> {
+                    openBatteryOptimizationSettings()
                     result.success(null)
                 }
                 else -> result.notImplemented()
@@ -265,6 +286,47 @@ class MainActivity : FlutterActivity() {
                 Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                 Uri.fromParts("package", packageName, null),
             ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(intent)
+        }
+    }
+
+    private fun isIgnoringBatteryOptimizations(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return true
+        }
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        return powerManager.isIgnoringBatteryOptimizations(packageName)
+    }
+
+    private fun requestIgnoreBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+            isIgnoringBatteryOptimizations()
+        ) {
+            return
+        }
+
+        val requestIntent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+            data = Uri.parse("package:$packageName")
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            startActivity(requestIntent)
+        } catch (error: ActivityNotFoundException) {
+            openBatteryOptimizationSettings()
+        } catch (error: SecurityException) {
+            Log.w(TAG, "Battery optimization exemption request rejected", error)
+            openBatteryOptimizationSettings()
+        }
+    }
+
+    private fun openBatteryOptimizationSettings() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(intent)
+        } else {
+            val intent = Intent(Settings.ACTION_SETTINGS)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             startActivity(intent)
         }
     }
